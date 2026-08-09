@@ -7,6 +7,7 @@ multi-process implementation and data statistics of Clover.
 from collections import  Counter
 from multiprocessing import Process, Queue
 import os
+from pathlib import Path
 import time
 
 from tqdm import tqdm
@@ -131,6 +132,8 @@ class MyProcess(Process):
         self.h_index=self.config_dict['h_index_nums']
         self.e_index=self.config_dict['e_index_nums']
         self.test_num = 0
+        self.core_export_path = self.config_dict.get('core_export_path')
+        self.core_export_file = None
         self.file_format = "txt"
         if 'input_path' in self.config_dict:
             if self.config_dict['input_path'][-1] == "a" :
@@ -138,6 +141,25 @@ class MyProcess(Process):
             elif self.config_dict['input_path'][-1] == "q" :
                 self.file_format = "fastq"
 
+
+    def _open_core_export(self):
+        if not self.core_export_path:
+            return
+        export_path = Path(self.core_export_path)
+        if export_path.parent != Path(""):
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+        self.core_export_file = export_path.open("w", encoding="utf-8", newline="")
+        self.core_export_file.write("cluster_id\tcore_read_id\tcore_sequence\n")
+
+    def _close_core_export(self):
+        if self.core_export_file is not None:
+            self.core_export_file.close()
+            self.core_export_file = None
+
+    def _export_initial_core(self, cluster_id, core_read_id, core_sequence):
+        if self.core_export_file is None:
+            return
+        self.core_export_file.write(f"{cluster_id}\t{core_read_id}\t{core_sequence}\n")
 
 
     def cluster(self,read):
@@ -322,6 +344,7 @@ class MyProcess(Process):
                         if self.config_dict['align_fuc'] == True:
                             self.ref_list[dna_num]=dna_str
                         self.ref_dict[dna_num]=[dna_tag]
+                        self._export_initial_core(dna_tag,dna_tag,dna_str)
                         self.a_tree.insert(dna_a_str,dna_num)
                         self.b_tree.insert(dna_b_str,dna_num)
                         self.c_tree.insert(dna_str[self.fuzz_list[0]-i:self.fuzz_list[0]+self.fuzz_list[2]-i],dna_num)
@@ -329,6 +352,14 @@ class MyProcess(Process):
 
     #Process flow
     def run(self):
+
+        self._open_core_export()
+        try:
+            self._run_impl()
+        finally:
+            self._close_core_export()
+
+    def _run_impl(self):
 
         self.num_dict[self.name+"sum_read_num"]=0
         self.num_dict[self.name+"error_num"]=0
@@ -568,6 +599,9 @@ if __name__ == '__main__':
 
 
 
+
+    if config_dict.get('core_export_path') and N_PROCESS != 1:
+        raise ValueError("--export-cluster-cores currently supports only single-process mode")
 
     q_output = Queue(N_PROCESS*2)
 

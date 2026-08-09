@@ -33,10 +33,11 @@ config_dict={
     "tag_mode" : False,
     "Statistical_model" : False,
     "same_tree_len" : True,
-    "now_align_alg" : False
+    "now_align_alg" : False,
+    "core_export_path" : None
 }
 
-opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat'])
+opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat','export-cluster-cores='])
 
 
 #Read input info
@@ -64,7 +65,7 @@ def generate_vertical_drifts_list(x):
 
 #Write the input to config.json
 def out_put_config():
-    opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat'])
+    opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat','export-cluster-cores='])
 
     for opt_name,opt_value in opt :
         if '-h' in opt_name or '--help' in opt_name:
@@ -96,6 +97,10 @@ def out_put_config():
             config_dict['Virtual_mode'] = False
         if '--stat' in opt_name :
             config_dict['Statistical_model'] = True
+        if '--export-cluster-cores' in opt_name:
+            if opt_value == "":
+                raise ValueError("--export-cluster-cores requires a non-empty path")
+            config_dict['core_export_path'] = opt_value
         if '--low' in opt_name:
             config_dict['mmr_mode'] = True
             config_dict['fast_mode'] = False
