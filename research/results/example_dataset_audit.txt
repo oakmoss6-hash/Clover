@@ -1,0 +1,38 @@
+# Clover Example Dataset Audit
+
+## example/example_tag_data.txt
+- file_size_bytes: 917
+- read_count: 6
+- unique_sequence_count: 3
+- exact_duplicate_count: 3
+- duplicate_ratio: 0.5
+- min_length: 150
+- median_length: 150.0
+- max_length: 150
+- all_same_length: True
+- alphabet: ACGT
+
+## example/example_index_data.txt
+- file_size_bytes: 917
+- read_count: 6
+- unique_sequence_count: 3
+- exact_duplicate_count: 3
+- duplicate_ratio: 0.5
+- min_length: 150
+- median_length: 150.0
+- max_length: 150
+- all_same_length: True
+- alphabet: ACGT
+
+## example/example_tag_data.txt tags
+- number_of_tags: 3
+- tag=1 read_count=2 unique_read_count=1 min_length=150 max_length=150 all_identical=True has_variant=False has_different_length=False has_exact_duplicate=True
+- tag=2 read_count=2 unique_read_count=1 min_length=150 max_length=150 all_identical=True has_variant=False has_different_length=False has_exact_duplicate=True
+- tag=3 read_count=2 unique_read_count=1 min_length=150 max_length=150 all_identical=True has_variant=False has_different_length=False has_exact_duplicate=True
+
+## Feature observations
+- exact duplicate: OBSERVED
+- substitution-like same-length variation: NOT OBSERVED
+- different-length variation: NOT OBSERVED
+- truncated reads: UNKNOWN
+- insertion/deletion: NOT OBSERVED
