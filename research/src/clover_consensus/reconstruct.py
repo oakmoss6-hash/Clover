@@ -7,6 +7,7 @@ from collections import defaultdict
 from .aligners import align_global
 from .alignment_models import AlignmentResult
 from .models import ClusterRecord
+from .normalization import normalize_indels_left
 from .profile_models import (
     BaseProfile,
     InsertionProfile,
@@ -131,6 +132,7 @@ def reconstruct_cluster(
     cluster: ClusterRecord,
     *,
     backend: str = "nw",
+    normalize_indels: bool = False,
 ) -> ReconstructionResult:
     """
     Reconstruct one cluster using a fixed-backbone star profile.
@@ -140,13 +142,18 @@ def reconstruct_cluster(
     are summed. Every unique non-backbone sequence is aligned against
     the backbone exactly once.
 
+    Optional indel normalization operates on each completed alignment
+    before profile projection and does not add alignment calls.
+
     No read-to-read comparison, all-pairs alignment, progressive
     merging, or U-by-U distance structure is created.
 
     Duplicate compression is linear in the total number of input
     sequence bases. Alignment cost is the sum of unique read-to-
     backbone alignment costs. Profile projection is linear in total
-    alignment output size.
+    alignment output size. The current deterministic normalization is
+    typically near-linear for short DNA-storage reads but may rescan
+    repeat-associated gap blocks in pathological cases.
 
     With the reference Needleman-Wunsch backend and sequences of length
     approximately L, alignment costs approximately O(U * L**2). For
@@ -197,6 +204,11 @@ def reconstruct_cluster(
         )
 
         pairwise_alignment_count += 1
+
+        if normalize_indels:
+            alignment = normalize_indels_left(
+                alignment
+            )
 
         _project_alignment(
             alignment,
