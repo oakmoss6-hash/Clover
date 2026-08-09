@@ -198,6 +198,106 @@ def align_global_nw(
     return result
 
 
+
+def align_global_edlib(
+    reference: str,
+    query: str,
+) -> AlignmentResult:
+    """
+    Exact unit-cost global alignment using Edlib.
+
+    Canonical operation semantics:
+
+        = : match
+        X : substitution
+        I : insertion in query relative to reference
+        D : deletion in query relative to reference
+    """
+    _validate_dna_sequence(reference, "reference")
+    _validate_dna_sequence(query, "query")
+
+    try:
+        import edlib
+    except ImportError as exc:
+        raise RuntimeError(
+            "Edlib backend requested but Python package 'edlib' "
+            "is not installed"
+        ) from exc
+
+    raw_result = edlib.align(
+        query,
+        reference,
+        mode="NW",
+        task="path",
+    )
+
+    edit_distance = raw_result["editDistance"]
+
+    if edit_distance < 0:
+        raise RuntimeError(
+            "Edlib failed to produce a global alignment"
+        )
+
+    # Edlib may return an empty CIGAR when either sequence is empty.
+    # Handle these global-alignment boundary cases explicitly so that
+    # canonical I/D semantics remain backend-independent.
+    if reference == "" and query == "":
+        return AlignmentResult.from_gapped_alignment(
+            reference="",
+            query="",
+            aligned_reference="",
+            aligned_query="",
+            backend="edlib",
+            backend_score=0,
+            backend_score_name="unit_edit_distance",
+        )
+
+    if reference == "":
+        return AlignmentResult.from_gapped_alignment(
+            reference=reference,
+            query=query,
+            aligned_reference="-" * len(query),
+            aligned_query=query,
+            backend="edlib",
+            backend_score=len(query),
+            backend_score_name="unit_edit_distance",
+        )
+
+    if query == "":
+        return AlignmentResult.from_gapped_alignment(
+            reference=reference,
+            query=query,
+            aligned_reference=reference,
+            aligned_query="-" * len(reference),
+            backend="edlib",
+            backend_score=len(reference),
+            backend_score_name="unit_edit_distance",
+        )
+
+    nice = edlib.getNiceAlignment(
+        raw_result,
+        query,
+        reference,
+    )
+
+    result = AlignmentResult.from_gapped_alignment(
+        reference=reference,
+        query=query,
+        aligned_reference=nice["target_aligned"],
+        aligned_query=nice["query_aligned"],
+        backend="edlib",
+        backend_score=edit_distance,
+        backend_score_name="unit_edit_distance",
+    )
+
+    if result.edit_distance != edit_distance:
+        raise RuntimeError(
+            "Edlib alignment path is inconsistent with "
+            "Edlib edit distance"
+        )
+
+    return result
+
 def align_global(
     reference: str,
     query: str,
@@ -206,8 +306,6 @@ def align_global(
 ) -> AlignmentResult:
     """
     Unified global-alignment entry point.
-
-    More backends will be registered here in Phase 5.3.
     """
     if backend == "nw":
         return align_global_nw(
@@ -215,6 +313,13 @@ def align_global(
             query,
         )
 
+    if backend == "edlib":
+        return align_global_edlib(
+            reference,
+            query,
+        )
+
     raise ValueError(
         f"unsupported global alignment backend: {backend}"
     )
+
