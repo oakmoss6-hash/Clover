@@ -1,11 +1,19 @@
-"""Clover-Aware Star Profile Reconstruction."""
+"""Clover-aware sparse star-profile reconstruction."""
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from .aligners import align_global
 from .alignment_models import AlignmentResult
+from .backbone import BackbonePolicy, select_backbone
+from .cluster_state import ClusterState
+from .local_repair import (
+    LocalRepairConfig,
+    choose_local_repairs,
+    core_projection,
+    detect_repeat_windows,
+    project_read_alignment,
+    render_consensus,
+)
 from .models import ClusterRecord
 from .normalization import normalize_indels_left
 from .profile_models import (
@@ -13,18 +21,6 @@ from .profile_models import (
     InsertionProfile,
     ReconstructionResult,
 )
-
-
-def _compress_sequences(
-    cluster: ClusterRecord,
-) -> dict[str, int]:
-    """Aggregate read multiplicities by identical sequence."""
-    sequence_weights: dict[str, int] = defaultdict(int)
-
-    for read in cluster.reads:
-        sequence_weights[read.sequence] += read.count
-
-    return dict(sequence_weights)
 
 
 def _project_alignment(
@@ -40,14 +36,9 @@ def _project_alignment(
     def flush_insertion() -> None:
         if not insertion_parts:
             return
-
-        insertion_profiles[
-            backbone_position
-        ].add_vote(
-            "".join(insertion_parts),
-            weight,
+        insertion_profiles[backbone_position].add_vote(
+            "".join(insertion_parts), weight
         )
-
         insertion_parts.clear()
 
     for column in alignment.iter_columns():
@@ -56,159 +47,136 @@ def _project_alignment(
             continue
 
         flush_insertion()
-
         if backbone_position >= len(base_profiles):
             raise ValueError(
-                "alignment consumes more backbone bases "
-                "than expected"
+                "alignment consumes more backbone bases than expected"
             )
-
         if column.ref_index != backbone_position:
             raise ValueError(
                 "alignment reference coordinates are not contiguous"
             )
 
         if column.operation in {"=", "X"}:
-            base_profiles[
-                backbone_position
-            ].add_vote(
-                column.query_base,
-                weight,
+            base_profiles[backbone_position].add_vote(
+                column.query_base, weight
             )
-
         elif column.operation == "D":
-            base_profiles[
-                backbone_position
-            ].add_vote(
-                "D",
-                weight,
-            )
-
+            base_profiles[backbone_position].add_vote("D", weight)
         else:
             raise ValueError(
-                "unsupported canonical operation: "
-                f"{column.operation}"
+                f"unsupported canonical operation: {column.operation}"
             )
-
         backbone_position += 1
 
     flush_insertion()
-
     if backbone_position != len(base_profiles):
         raise ValueError(
             "alignment does not cover every backbone position"
         )
 
 
-def _build_consensus(
+def _profile_decisions(
     base_profiles: list[BaseProfile],
     insertion_profiles: list[InsertionProfile],
     total_weight: int,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    return (
+        tuple(profile.consensus_symbol() for profile in base_profiles),
+        tuple(
+            profile.consensus_insertion(total_weight)
+            for profile in insertion_profiles
+        ),
+    )
+
+
+def _target_length_guard(
+    baseline: str,
+    repaired: str,
+    target_length: int | None,
 ) -> str:
-    consensus_parts: list[str] = [
-        insertion_profiles[0].consensus_insertion(
-            total_weight
-        )
-    ]
-
-    for index, profile in enumerate(base_profiles):
-        symbol = profile.consensus_symbol()
-
-        if symbol != "D":
-            consensus_parts.append(symbol)
-
-        consensus_parts.append(
-            insertion_profiles[
-                index + 1
-            ].consensus_insertion(
-                total_weight
-            )
-        )
-
-    return "".join(consensus_parts)
+    """Reject a repair only when it moves farther from a known target length."""
+    if target_length is None:
+        return repaired
+    if target_length < 1:
+        raise ValueError("target_length must be positive")
+    baseline_error = abs(len(baseline) - target_length)
+    repaired_error = abs(len(repaired) - target_length)
+    return baseline if repaired_error > baseline_error else repaired
 
 
-def reconstruct_cluster(
-    cluster: ClusterRecord,
+def reconstruct_state(
+    state: ClusterState,
     *,
     backend: str = "nw",
     normalize_indels: bool = False,
+    local_repeat_repair: bool = False,
+    target_length: int | None = None,
+    local_repair_config: LocalRepairConfig | None = None,
+    backbone_policy: BackbonePolicy | str = "core",
 ) -> ReconstructionResult:
     """
-    Reconstruct one cluster using a fixed-backbone star profile.
+    Reconstruct one compact Clover cluster state.
 
-    The fixed backbone is cluster.core_sequence. Duplicate reads are
-    compressed by identical sequence and their ReadRecord.count values
-    are summed. Every unique non-backbone sequence is aligned against
-    the backbone exactly once.
-
-    Optional indel normalization operates on each completed alignment
-    before profile projection and does not add alignment calls.
-
-    No read-to-read comparison, all-pairs alignment, progressive
-    merging, or U-by-U distance structure is created.
-
-    Duplicate compression is linear in the total number of input
-    sequence bases. Alignment cost is the sum of unique read-to-
-    backbone alignment costs. Profile projection is linear in total
-    alignment output size. The current deterministic normalization is
-    typically near-linear for short DNA-storage reads but may rescan
-    repeat-associated gap blocks in pathological cases.
-
-    With the reference Needleman-Wunsch backend and sequences of length
-    approximately L, alignment costs approximately O(U * L**2). For
-    fixed short DNA length L, scaling in unique sequence count U is
-    linear.
+    The coordinate backbone is selected without reference truth. Every unique
+    non-backbone sequence is globally aligned exactly once, so the pairwise
+    call count remains U-1 independently of raw cluster coverage.
     """
-    backbone = cluster.core_sequence
-    sequence_weights = _compress_sequences(cluster)
-
-    if backbone not in sequence_weights:
+    if normalize_indels and local_repeat_repair:
         raise ValueError(
-            "ClusterRecord violates the CASPR/Phase-4.5 contract: "
-            "cluster.core_sequence must be represented in cluster.reads "
-            "so the initial Clover core participates as evidence"
+            "local repeat repair cannot be combined with indel normalization"
         )
 
-    total_weight = sum(sequence_weights.values())
+    state.validate()
+    sequence_weights = state.sequence_weights
+    backbone = select_backbone(
+        sequence_weights,
+        core_sequence=state.routing_core,
+        policy=backbone_policy,
+    )
+    total_weight = state.total_weight
 
     base_profiles = [
-        BaseProfile(
-            backbone_index=index,
-            backbone_base=base,
-        )
+        BaseProfile(backbone_index=index, backbone_base=base)
         for index, base in enumerate(backbone)
     ]
-
     insertion_profiles = [
         InsertionProfile(slot=slot)
         for slot in range(len(backbone) + 1)
     ]
 
+    repair_config = local_repair_config or LocalRepairConfig()
+    windows = (
+        detect_repeat_windows(
+            backbone,
+            flank=repair_config.flank,
+            max_window_length=repair_config.max_window_length,
+            homopolymer_min_length=(
+                repair_config.homopolymer_min_length
+            ),
+            tandem_periods=repair_config.tandem_periods,
+            tandem_min_copies=repair_config.tandem_min_copies,
+        )
+        if local_repeat_repair else []
+    )
+    local_projections = (
+        {backbone: core_projection(backbone)}
+        if windows else {}
+    )
     pairwise_alignment_count = 0
 
     for sequence, weight in sequence_weights.items():
         if sequence == backbone:
             for index, base in enumerate(backbone):
-                base_profiles[index].add_vote(
-                    base,
-                    weight,
-                )
-
+                base_profiles[index].add_vote(base, weight)
             continue
 
-        alignment = align_global(
-            backbone,
-            sequence,
-            backend=backend,
-        )
-
+        alignment = align_global(backbone, sequence, backend=backend)
         pairwise_alignment_count += 1
 
+        if windows:
+            local_projections[sequence] = project_read_alignment(alignment)
         if normalize_indels:
-            alignment = normalize_indels_left(
-                alignment
-            )
+            alignment = normalize_indels_left(alignment)
 
         _project_alignment(
             alignment,
@@ -217,27 +185,81 @@ def reconstruct_cluster(
             insertion_profiles,
         )
 
+    expected_pairwise = state.unique_sequence_count - 1
+    if pairwise_alignment_count != expected_pairwise:
+        raise RuntimeError(
+            "star-alignment invariant failed: "
+            f"{pairwise_alignment_count} != U-1 {expected_pairwise}"
+        )
+
     for profile in base_profiles:
         if profile.total_weight != total_weight:
-            raise RuntimeError(
-                "base profile weight conservation failed"
-            )
+            raise RuntimeError("base profile weight conservation failed")
 
-    consensus = _build_consensus(
-        base_profiles,
-        insertion_profiles,
-        total_weight,
+    base_decisions, insertion_decisions = _profile_decisions(
+        base_profiles, insertion_profiles, total_weight
+    )
+    repairs = (
+        choose_local_repairs(
+            backbone,
+            windows,
+            sequence_weights,
+            local_projections,
+            base_decisions,
+            insertion_decisions,
+            config=repair_config,
+        )
+        if windows else []
+    )
+    baseline_consensus = render_consensus(
+        base_decisions, insertion_decisions
+    )
+    repaired_consensus = render_consensus(
+        base_decisions, insertion_decisions, repairs
+    )
+    consensus = _target_length_guard(
+        baseline_consensus,
+        repaired_consensus,
+        target_length,
     )
 
     return ReconstructionResult(
-        cluster_id=cluster.cluster_id,
+        cluster_id=state.cluster_id,
         backbone=backbone,
         consensus=consensus,
         backend=backend,
-        raw_read_count=cluster.raw_read_count,
+        raw_read_count=state.raw_read_count,
         total_weight=total_weight,
-        unique_sequence_count=len(sequence_weights),
+        unique_sequence_count=state.unique_sequence_count,
         pairwise_alignment_count=pairwise_alignment_count,
         base_profiles=tuple(base_profiles),
         insertion_profiles=tuple(insertion_profiles),
+    )
+
+
+def reconstruct_cluster(
+    cluster: ClusterRecord,
+    *,
+    backend: str = "nw",
+    normalize_indels: bool = False,
+    local_repeat_repair: bool = False,
+    target_length: int | None = None,
+    local_repair_config: LocalRepairConfig | None = None,
+    backbone_policy: BackbonePolicy | str = "core",
+) -> ReconstructionResult:
+    """
+    Backward-compatible adapter from the existing Clover ``ClusterRecord``.
+
+    Future Clover integration can aggregate reads directly into
+    ``ClusterState`` and call ``reconstruct_state`` to avoid retaining and
+    recompressing duplicate read objects.
+    """
+    return reconstruct_state(
+        ClusterState.from_cluster(cluster),
+        backend=backend,
+        normalize_indels=normalize_indels,
+        local_repeat_repair=local_repeat_repair,
+        target_length=target_length,
+        local_repair_config=local_repair_config,
+        backbone_policy=backbone_policy,
     )

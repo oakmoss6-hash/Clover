@@ -298,7 +298,7 @@ def align_global_edlib(
 
     return result
 
-def align_global(
+def _align_global_existing(
     reference: str,
     query: str,
     *,
@@ -322,4 +322,116 @@ def align_global(
     raise ValueError(
         f"unsupported global alignment backend: {backend}"
     )
+# ---- Phase 11 WFA backend -------------------------------------------------
+_WFA_ALIGNER = None
 
+
+def _get_wfa_aligner():
+    global _WFA_ALIGNER
+    if _WFA_ALIGNER is None:
+        try:
+            from pywfa import WavefrontAligner
+        except ImportError as exc:
+            raise ImportError(
+                "backend='wfa' requires pywfa; install pywfa==0.5.1"
+            ) from exc
+        _WFA_ALIGNER = WavefrontAligner(
+            distance="affine",
+            span="end-to-end",
+            scope="full",
+            heuristic=None,
+            mismatch=1,
+            gap_opening=0,
+            gap_extension=1,
+        )
+    return _WFA_ALIGNER
+
+
+def _validate_wfa_sequence(sequence: str, name: str) -> None:
+    if not isinstance(sequence, str):
+        raise TypeError(f"{name} must be a string")
+    invalid = set(sequence) - set("ACGT")
+    if invalid:
+        raise ValueError(
+            f"{name} contains invalid DNA symbols: {sorted(invalid)}"
+        )
+
+
+def _wfa_gapped_alignment(reference: str, query: str, cigar_tuples):
+    ref_parts = []
+    query_parts = []
+    ref_index = 0
+    query_index = 0
+
+    for operation, length in cigar_tuples:
+        if operation in {0, 7, 8}:  # M, =, X
+            ref_end = ref_index + length
+            query_end = query_index + length
+            ref_parts.append(reference[ref_index:ref_end])
+            query_parts.append(query[query_index:query_end])
+            ref_index = ref_end
+            query_index = query_end
+        elif operation == 1:  # I: query only
+            query_end = query_index + length
+            ref_parts.append("-" * length)
+            query_parts.append(query[query_index:query_end])
+            query_index = query_end
+        elif operation == 2:  # D: reference only
+            ref_end = ref_index + length
+            ref_parts.append(reference[ref_index:ref_end])
+            query_parts.append("-" * length)
+            ref_index = ref_end
+        else:
+            raise RuntimeError(
+                f"unsupported WFA CIGAR operation code: {operation}"
+            )
+
+    if ref_index != len(reference):
+        raise RuntimeError("WFA CIGAR did not consume the complete reference")
+    if query_index != len(query):
+        raise RuntimeError("WFA CIGAR did not consume the complete query")
+
+    aligned_reference = "".join(ref_parts)
+    aligned_query = "".join(query_parts)
+    if len(aligned_reference) != len(aligned_query):
+        raise RuntimeError("WFA produced unequal gapped alignment lengths")
+    return aligned_reference, aligned_query
+
+
+def _align_wfa(reference: str, query: str) -> AlignmentResult:
+    """Exact end-to-end WFA under the same unit-edit objective as Edlib."""
+    _validate_wfa_sequence(reference, "reference")
+    _validate_wfa_sequence(query, "query")
+    result = _get_wfa_aligner()(query, reference)
+    if result.status != 0:
+        raise RuntimeError(f"WFA alignment failed with status {result.status}")
+
+    aligned_reference, aligned_query = _wfa_gapped_alignment(
+        reference, query, result.cigartuples
+    )
+    distance = -int(result.score)
+    if distance < 0:
+        raise RuntimeError(f"unexpected positive WFA score: {result.score}")
+
+    alignment = AlignmentResult.from_gapped_alignment(
+        reference=reference,
+        query=query,
+        aligned_reference=aligned_reference,
+        aligned_query=aligned_query,
+        backend="wfa",
+        backend_score=distance,
+        backend_score_name="unit_edit_distance",
+    )
+    if alignment.edit_distance != distance:
+        raise RuntimeError(
+            "WFA score and canonical edit distance disagree: "
+            f"{distance} != {alignment.edit_distance}"
+        )
+    return alignment
+
+
+def align_global(reference: str, query: str, *, backend: str = "nw") -> AlignmentResult:
+    if backend == "wfa":
+        return _align_wfa(reference, query)
+    return _align_global_existing(reference, query, backend=backend)
+# ---- End Phase 11 WFA backend --------------------------------------------
