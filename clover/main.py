@@ -291,7 +291,8 @@ class MyProcess(Process):
                     
                     self.index_list.append((dna_index,self.ref_dict[a_align[0]][0]))
                 else:
-                    self.ref_dict[a_align[0]].append(dna_tag)
+                    if not self.config_dict.get('reconstruct'):
+                        self.ref_dict[a_align[0]].append(dna_tag)
                 
                 self._record_routing_hint(
                     a_align[0],
@@ -345,7 +346,8 @@ class MyProcess(Process):
                 if self.config_dict['Virtual_mode'] == False:
                     self.index_list.append((dna_index,self.ref_dict[b_align[0]][0]))
                 else:
-                    self.ref_dict[b_align[0]].append(dna_tag)
+                    if not self.config_dict.get('reconstruct'):
+                        self.ref_dict[b_align[0]].append(dna_tag)
 
                 self._record_routing_hint(
                     b_align[0],
@@ -420,7 +422,8 @@ class MyProcess(Process):
                         if self.config_dict['Virtual_mode'] == False:
                             self.index_list.append((dna_index,self.ref_dict[fin_align[0]][0]))
                         else:
-                            self.ref_dict[fin_align[0]].append(dna_tag)
+                            if not self.config_dict.get('reconstruct'):
+                                self.ref_dict[fin_align[0]].append(dna_tag)
 
                         if fin_route is not None:
                             self._record_routing_hint(
@@ -504,7 +507,55 @@ class MyProcess(Process):
         self.num_dict[self.name+"sum_tag"]=[]
         len_=len(self.name) 
         
-        if self.config_dict['fast_mode'] == True :
+        # Production streaming reconstruction path.
+        # Raw FASTQ/FASTA reads are never accumulated in memory.
+        if (
+            self.config_dict.get('reconstruct')
+            and self.config_dict['fast_mode'] is False
+            and self.config_dict['mmr_mode'] is False
+        ):
+            processed_reads = 0
+
+            for dna_reads in iter_clover_records(
+                self.config_dict['input_path']
+            ):
+                fields = dna_reads.split(maxsplit=1)
+
+                if len(fields) != 2:
+                    continue
+
+                sequence = fields[1]
+
+                if (
+                    len(sequence)
+                    < self.config_dict['read_len_min']
+                ):
+                    continue
+
+                if 'N' in sequence or '*' in sequence:
+                    continue
+
+                if (
+                    int(self.config_dict['processes_nums']) == 0
+                ):
+                    self.cluster(dna_reads)
+                    processed_reads += 1
+
+                elif sequence[:len_] == self.name:
+                    self.cluster(dna_reads)
+                    processed_reads += 1
+
+            self.num_dict[
+                self.name + 'sum_read_num'
+            ] = processed_reads
+
+            self.num_dict[
+                self.name + 'sum_cluster_num'
+            ] = len(self.ref_dict)
+
+            # Continue to the common worker finalization below.
+
+        elif self.config_dict['fast_mode'] == True :
             
             for line in tqdm(self.data):
                 self.cluster(line)
@@ -952,7 +1003,10 @@ if __name__ == '__main__':
         output_file = open(config_dict['output_file'],'w')
         output_file.write(str(new_count_dict["index_list"]))
         output_file.close()
-    if config_dict['Virtual_mode'] == True :
+    if (
+        config_dict['Virtual_mode'] == True
+        and not config_dict.get('reconstruct')
+    ):
         #print("Number of reads processed:",new_count_dict["sum_read_num"],new_count_dict["error_num"],new_count_dict["sum_cluster_num"])
         print("Number of reads processed:",new_count_dict["sum_read_num"])
         print("Accuracy：",(new_count_dict["sum_read_num"]-new_count_dict["error_num"])/new_count_dict["sum_read_num"])

@@ -1,0 +1,21 @@
+
+# Local Python environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.before_*
+
+# Large/local research artifacts
+research/data/
+research/results/
+research/external/
