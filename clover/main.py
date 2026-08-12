@@ -15,6 +15,8 @@ from tqdm import tqdm
 from clover import align as ag
 from clover import load_config as lc
 from clover import tree as tr
+from clover.input_io import iter_clover_records
+from clover.reconstruction import CloverWorkerReconstructor
 from clover.routing import RoutingHint
 
 class MyProcess(Process):
@@ -700,8 +702,12 @@ if __name__ == '__main__':
         print("Generating data")
         data_dict = {}
         data_dict['all']=[]
-        f= open(config_dict['input_path'],'r').readlines()
-        for i in tqdm(f):
+        for i in tqdm(
+            iter_clover_records(
+                config_dict['input_path']
+            ),
+            desc="Loading reads",
+        ):
             if "N" in i :
                 pass
             else:
@@ -725,12 +731,28 @@ if __name__ == '__main__':
 
         if config_dict['fast_mode'] == True:
             print("Pre-process the data")
-            f= open(config_dict['input_path'],'r').readlines()
-            for i in tqdm(f):
+            for i in tqdm(
+                iter_clover_records(
+                    config_dict['input_path']
+                ),
+                desc="Pre-process reads",
+            ):
                 if "N" in i or "*" in i :
-                    pass
-                else:
-                    data_dict[i.split()[1][:PROCESS_INDEX]].append(i)
+                    continue
+
+                fields = i.split()
+
+                if len(fields) < 2:
+                    continue
+
+                prefix = fields[1][
+                    :PROCESS_INDEX
+                ]
+
+                if prefix not in data_dict:
+                    continue
+
+                data_dict[prefix].append(i)
         else:
             data_dict[i] = []
 
@@ -746,7 +768,35 @@ if __name__ == '__main__':
     process_dict = {}.fromkeys(process_names)
 
     for i in process_dict:
-        process_dict[i] = MyProcess(i, data_dict[i], q_output)
+        process_dict[i] = MyProcess(
+            i,
+            data_dict[i],
+            q_output,
+        )
+
+        if config_dict.get('reconstruct'):
+            reconstructor = (
+                CloverWorkerReconstructor(
+                    worker_name=i,
+                    backend=config_dict[
+                        'reconstruct_backend'
+                    ],
+                    backbone_policy="core",
+                    local_repeat_repair=False,
+                )
+            )
+
+            reconstructor.attach_to_process(
+                process_dict[i]
+            )
+
+            # Keep an explicit owner reference for
+            # multiprocessing/spawn compatibility.
+            process_dict[
+                i
+            ]._clover_reconstructor = (
+                reconstructor
+            )
 
     for i in process_dict:
         process_dict[i].start()
@@ -764,6 +814,121 @@ if __name__ == '__main__':
     for i in process_dict:
         process_dict[i].join()    
     
+    if config_dict.get('reconstruct'):
+        output_path = Path(
+            config_dict[
+                'consensus_output_path'
+            ]
+        )
+
+        if output_path.parent != Path(""):
+            output_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+        total_clusters = 0
+        total_raw = 0
+        total_unique = 0
+        total_pairwise = 0
+
+        with output_path.open(
+            "w",
+            encoding="utf-8",
+            newline="",
+        ) as output:
+            output.write(
+                "worker\tcluster_id\t"
+                "routing_core\tconsensus\t"
+                "raw_read_count\t"
+                "unique_sequence_count\t"
+                "pairwise_alignment_count\n"
+            )
+
+            for worker_name in process_dict:
+                rows = count_dict[
+                    worker_name
+                    + "reconstruction_results"
+                ]
+
+                total_clusters += count_dict[
+                    worker_name
+                    + "reconstruction_cluster_count"
+                ]
+
+                total_raw += count_dict[
+                    worker_name
+                    + "reconstruction_raw_read_count"
+                ]
+
+                total_unique += count_dict[
+                    worker_name
+                    + "reconstruction_unique_sequence_count"
+                ]
+
+                total_pairwise += count_dict[
+                    worker_name
+                    + "reconstruction_pairwise_alignment_count"
+                ]
+
+                for (
+                    cluster_id,
+                    consensus,
+                    backbone,
+                    raw_count,
+                    unique_count,
+                    pairwise_count,
+                ) in rows:
+                    output.write(
+                        f"{worker_name}\t"
+                        f"{cluster_id}\t"
+                        f"{backbone}\t"
+                        f"{consensus}\t"
+                        f"{raw_count}\t"
+                        f"{unique_count}\t"
+                        f"{pairwise_count}\n"
+                    )
+
+        expected_pairwise = (
+            total_unique - total_clusters
+        )
+
+        if (
+            total_pairwise
+            != expected_pairwise
+        ):
+            raise RuntimeError(
+                "global reconstruction invariant "
+                "failed: "
+                f"A={total_pairwise} != "
+                f"U-C={expected_pairwise}"
+            )
+
+        print(
+            "Reconstruction clusters:",
+            total_clusters,
+        )
+        print(
+            "Reconstruction raw reads M:",
+            total_raw,
+        )
+        print(
+            "Reconstruction unique U:",
+            total_unique,
+        )
+        print(
+            "Pairwise global alignments A:",
+            total_pairwise,
+        )
+        print(
+            "U-C:",
+            expected_pairwise,
+        )
+        print(
+            "Consensus output:",
+            output_path,
+        )
+
     new_count_dict={}
     new_count_dict["sum_read_num"]=0
     new_count_dict["error_num"]=0

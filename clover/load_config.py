@@ -34,10 +34,27 @@ config_dict={
     "Statistical_model" : False,
     "same_tree_len" : True,
     "now_align_alg" : False,
-    "core_export_path" : None
+    "core_export_path" : None,
+
+    # Clover reconstruction v1.0
+    "reconstruct" : False,
+    "reconstruct_backend" : "wfa",
+    "consensus_output_path" : None
 }
 
-opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat','export-cluster-cores='])
+opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',[
+        'help',
+        'low',
+        'align',
+        'no-fast',
+        'no-tag',
+        'stat',
+        'export-cluster-cores=',
+        'input=',
+        'reconstruct',
+        'reconstruct-backend=',
+        'consensus-output=',
+    ])
 
 
 #Read input info
@@ -65,12 +82,26 @@ def generate_vertical_drifts_list(x):
 
 #Write the input to config.json
 def out_put_config():
-    opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',['help','low','no-fast','no-tag','stat','export-cluster-cores='])
+    opt,args = getopt.getopt(sys.argv[1:],'-I:-L:-D:-V:-H:-T:-P:-O:-h',[
+        'help',
+        'low',
+        'align',
+        'no-fast',
+        'no-tag',
+        'stat',
+        'export-cluster-cores=',
+        'input=',
+        'reconstruct',
+        'reconstruct-backend=',
+        'consensus-output=',
+    ])
 
     for opt_name,opt_value in opt :
         if '-h' in opt_name or '--help' in opt_name:
             print("Please see readme.md")
         if '-I' in opt_name :
+            config_dict['input_path'] = opt_value
+        if opt_name == '--input':
             config_dict['input_path'] = opt_value
         if '-L' in opt_name :
             config_dict['read_len'] =int(opt_value)
@@ -101,12 +132,52 @@ def out_put_config():
             if opt_value == "":
                 raise ValueError("--export-cluster-cores requires a non-empty path")
             config_dict['core_export_path'] = opt_value
+        if opt_name == '--reconstruct':
+            config_dict['reconstruct'] = True
+
+        if opt_name == '--reconstruct-backend':
+            backend = opt_value.lower()
+
+            if backend not in {'wfa', 'edlib', 'nw'}:
+                raise ValueError(
+                    "--reconstruct-backend must be "
+                    "wfa, edlib, or nw"
+                )
+
+            config_dict[
+                'reconstruct_backend'
+            ] = backend
+
+        if opt_name == '--consensus-output':
+            if not opt_value:
+                raise ValueError(
+                    "--consensus-output requires a path"
+                )
+
+            config_dict[
+                'consensus_output_path'
+            ] = opt_value
+
         if '--low' in opt_name:
             config_dict['mmr_mode'] = True
             config_dict['fast_mode'] = False
             config_dict['align_fuc'] = False
             config_dict['Statistical_model'] = False
             config_dict['Virtual_mode'] = False
+    if config_dict.get('reconstruct'):
+        if config_dict.get('align_fuc'):
+            raise ValueError(
+                "old --align and new --reconstruct "
+                "are mutually exclusive"
+            )
+
+        if not config_dict.get(
+            'consensus_output_path'
+        ):
+            config_dict[
+                'consensus_output_path'
+            ] = "clover_consensus.tsv"
+
     if config_dict['read_len_min'] == 0 :
         config_dict['read_len_min'] = config_dict['read_len'] - 5
     if type(config_dict['Vertical_drift']) == int :
