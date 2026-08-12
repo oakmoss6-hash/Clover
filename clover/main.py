@@ -15,6 +15,7 @@ from tqdm import tqdm
 from clover import align as ag
 from clover import load_config as lc
 from clover import tree as tr
+from clover.routing import RoutingHint
 
 class MyProcess(Process):
     """Process Class
@@ -121,6 +122,11 @@ class MyProcess(Process):
         self.num_dict={}
         self.tag_dict={}
         self.index_list=[]   
+
+        # Phase 13.2: passive routing metadata capture.
+        # Disabled by default so historical Clover behavior is unchanged.
+        self.capture_routing_hints = False
+        self.routing_hints = {}
         self.now_clust_threshold = self.config_dict['now_clust_threshold']
         self.read_len= self.config_dict['read_len']  
         self.dna_tree_nums = self.config_dict['end_tree_len']
@@ -160,6 +166,29 @@ class MyProcess(Process):
         if self.core_export_file is None:
             return
         self.core_export_file.write(f"{cluster_id}\t{core_read_id}\t{core_sequence}\n")
+
+
+    def _record_routing_hint(
+        self,
+        core_index,
+        sequence,
+        tree_kind,
+        horizontal_drifts,
+        query_shift=0,
+    ):
+        """Record already-computed Clover routing information."""
+        if not self.capture_routing_hints:
+            return
+
+        cluster_hints = self.routing_hints.setdefault(core_index, {})
+        cluster_hints.setdefault(
+            sequence,
+            RoutingHint(
+                tree_kind=tree_kind,
+                horizontal_drifts=horizontal_drifts,
+                query_shift=query_shift,
+            ),
+        )
 
 
     def cluster(self,read):
@@ -204,6 +233,13 @@ class MyProcess(Process):
                 else:
                     self.ref_dict[a_align[0]].append(dna_tag)
                 
+                self._record_routing_hint(
+                    a_align[0],
+                    dna_str,
+                    "front",
+                    a_align[1],
+                )
+
                 if self.align_swicth is True:  #If global comparison is done, global comparison is started after matching.
                     error_list = []
                     align_list=a_align
@@ -246,6 +282,13 @@ class MyProcess(Process):
                 else:
                     self.ref_dict[b_align[0]].append(dna_tag)
 
+                self._record_routing_hint(
+                    b_align[0],
+                    dna_str,
+                    "back",
+                    b_align[1],
+                )
+
                 if self.align_swicth is True:
                     error_list = []
                     align_list=b_align
@@ -283,6 +326,7 @@ class MyProcess(Process):
                 #If the trees at the first and last ends cannot be matched, try the middle tree.
                 if dna_str_num >= self.config_dict['read_len_min'] :
                     fin_align=["",1000]
+                    fin_route=None
                     for i in self.loc_nums:
                         if self.h_index == 0 :
                             dna_c_str=dna_str[self.fuzz_list[0]-i:self.fuzz_list[0]+self.fuzz_list[2]-i]
@@ -291,6 +335,7 @@ class MyProcess(Process):
                         c_align = self.c_tree.fuzz_fin(dna_c_str,self.config_dict['tree_threshold']) 
                         if c_align[1]<fin_align[1] :
                                 fin_align=c_align
+                                fin_route=("middle_c", i)
                         if self.config_dict['other_tree_nums'] == 2 :
                             if self.e_index == 0 :
                                 dna_d_str=dna_str[self.read_len-2-self.fuzz_list[1]-i:self.read_len-2-self.fuzz_list[1]+self.fuzz_list[2]-i]
@@ -299,6 +344,7 @@ class MyProcess(Process):
                             d_align = self.d_tree.fuzz_fin(dna_d_str,self.config_dict['tree_threshold'])
                             if d_align[1]<fin_align[1] :
                                 fin_align=d_align
+                                fin_route=("middle_d", i)
 
                     if fin_align[1] < self.fuzz_tree_nums :
                         if self.config_dict['Virtual_mode'] == False:
@@ -443,6 +489,7 @@ class MyProcess(Process):
                         output_file.write(str(i))
                         output_file.write(',')
                         self.index_list=[]
+
             if 'output_file' in self.config_dict :
                 for i in self.index_list:
                     output_file.write(str(i))
