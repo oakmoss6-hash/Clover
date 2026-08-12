@@ -95,6 +95,51 @@ class TestWorkerFinalizer(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             process._finalize_worker_outputs()
 
+    def test_reconstructor_attaches_both_worker_hooks(self):
+        q = RecordingQueue()
+        process = make_process(q)
+
+        reconstructor = CloverWorkerReconstructor(
+            worker_name="A",
+            backend="wfa",
+        )
+
+        reconstructor.attach_to_process(process)
+
+        self.assertIsNotNone(
+            process.cluster_membership_observer
+        )
+        self.assertIsNotNone(
+            process.worker_finalize_observer
+        )
+
+        self.assertEqual(
+            process.cluster_membership_observer.__self__,
+            reconstructor,
+        )
+        self.assertEqual(
+            process.worker_finalize_observer.__self__,
+            reconstructor,
+        )
+
+    def test_reconstructor_rejects_double_attachment(self):
+        q = RecordingQueue()
+        process = make_process(q)
+
+        first = CloverWorkerReconstructor(
+            worker_name="A",
+            backend="wfa",
+        )
+        second = CloverWorkerReconstructor(
+            worker_name="A",
+            backend="wfa",
+        )
+
+        first.attach_to_process(process)
+
+        with self.assertRaises(RuntimeError):
+            second.attach_to_process(process)
+
     @unittest.skipUnless(
         HAS_PYWFA,
         "optional dependency pywfa is not installed",

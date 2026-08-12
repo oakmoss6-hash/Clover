@@ -26,6 +26,21 @@ class CloverWorkerReconstructor:
         default_factory=CloverClusterStateAdapter
     )
 
+    def attach_to_process(self, process) -> None:
+        """Attach this reconstructor to one already-created Clover worker."""
+        if process.cluster_membership_observer is not None:
+            raise RuntimeError(
+                "Clover worker already has a cluster membership observer"
+            )
+
+        if process.worker_finalize_observer is not None:
+            raise RuntimeError(
+                "Clover worker already has a finalizer observer"
+            )
+
+        process.cluster_membership_observer = self.record_membership
+        process.worker_finalize_observer = self.finalize
+
     def record_membership(
         self,
         *,
