@@ -140,6 +140,77 @@ class TestWorkerFinalizer(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             second.attach_to_process(process)
 
+    def test_singleton_cluster_skips_reconstruction_engine(self):
+        reconstructor = CloverWorkerReconstructor(
+            worker_name="A",
+            backend="wfa",
+            backbone_policy="core",
+        )
+
+        # M = 3 but U = 1.
+        reconstructor.record_membership(
+            core_index=1,
+            sequence="AAAAAA",
+            is_new_core=True,
+        )
+        reconstructor.record_membership(
+            core_index=1,
+            sequence="AAAAAA",
+        )
+        reconstructor.record_membership(
+            core_index=1,
+            sequence="AAAAAA",
+        )
+
+        with patch(
+            "clover_consensus.clover_worker_reconstruction."
+            "reconstruct_state"
+        ) as mocked_reconstruct:
+            output = reconstructor.finalize()
+
+        mocked_reconstruct.assert_not_called()
+
+        self.assertEqual(
+            output["Areconstruction_cluster_count"],
+            1,
+        )
+        self.assertEqual(
+            output["Areconstruction_raw_read_count"],
+            3,
+        )
+        self.assertEqual(
+            output["Areconstruction_unique_sequence_count"],
+            1,
+        )
+        self.assertEqual(
+            output["Areconstruction_pairwise_alignment_count"],
+            0,
+        )
+        self.assertEqual(
+            output["Areconstruction_singleton_cluster_count"],
+            1,
+        )
+        self.assertEqual(
+            output["Areconstruction_multi_unique_cluster_count"],
+            0,
+        )
+
+        rows = output["Areconstruction_results"]
+
+        self.assertEqual(
+            rows,
+            [
+                (
+                    1,
+                    "AAAAAA",
+                    "AAAAAA",
+                    3,
+                    1,
+                    0,
+                )
+            ],
+        )
+
     @unittest.skipUnless(
         HAS_PYWFA,
         "optional dependency pywfa is not installed",

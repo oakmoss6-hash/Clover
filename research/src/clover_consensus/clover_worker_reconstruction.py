@@ -65,8 +65,38 @@ class CloverWorkerReconstructor:
         unique_sequences = 0
         pairwise_alignments = 0
 
+        singleton_clusters = 0
+        multi_unique_clusters = 0
+
         for core_index in sorted(self.adapter.states):
             state = self.adapter.states[core_index]
+
+            # Exact singleton fast path.
+            #
+            # If U_c == 1, every read in the cluster is the same sequence
+            # after exact duplicate aggregation.  Consensus and backbone are
+            # therefore already known and no profile or pairwise alignment
+            # needs to be constructed.
+            if state.unique_sequence_count == 1:
+                sequence = state.routing_core
+
+                singleton_clusters += 1
+                raw_reads += state.raw_read_count
+                unique_sequences += 1
+
+                rows.append(
+                    (
+                        core_index,
+                        sequence,
+                        sequence,
+                        state.raw_read_count,
+                        1,
+                        0,
+                    )
+                )
+                continue
+
+            multi_unique_clusters += 1
 
             result = reconstruct_state(
                 state,
@@ -118,5 +148,11 @@ class CloverWorkerReconstructor:
             ),
             prefix + "reconstruction_pairwise_alignment_count": (
                 pairwise_alignments
+            ),
+            prefix + "reconstruction_singleton_cluster_count": (
+                singleton_clusters
+            ),
+            prefix + "reconstruction_multi_unique_cluster_count": (
+                multi_unique_clusters
             ),
         }
