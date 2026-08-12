@@ -131,6 +131,11 @@ class MyProcess(Process):
         # Phase 14: passive reconstruction-state observer.
         # Disabled by default and never participates in Clover routing.
         self.cluster_membership_observer = None
+
+        # Phase 14.1: optional worker-local finalizer.
+        # Used after clustering is complete but before q_output.put().
+        # Disabled by default so historical Clover output is unchanged.
+        self.worker_finalize_observer = None
         self.now_clust_threshold = self.config_dict['now_clust_threshold']
         self.read_len= self.config_dict['read_len']  
         self.dna_tree_nums = self.config_dict['end_tree_len']
@@ -212,6 +217,34 @@ class MyProcess(Process):
             sequence=sequence,
             is_new_core=is_new_core,
         )
+
+
+    def _finalize_worker_outputs(self):
+        """Merge optional worker-local results into Clover's output dict."""
+        observer = self.worker_finalize_observer
+
+        if observer is None:
+            return
+
+        extra = observer()
+
+        if extra is None:
+            return
+
+        if not isinstance(extra, dict):
+            raise TypeError(
+                "worker_finalize_observer must return dict or None"
+            )
+
+        overlap = set(extra).intersection(self.num_dict)
+
+        if overlap:
+            raise RuntimeError(
+                "worker finalizer attempted to overwrite Clover output keys: "
+                + ", ".join(sorted(overlap))
+            )
+
+        self.num_dict.update(extra)
 
 
     def cluster(self,read):
@@ -623,6 +656,7 @@ class MyProcess(Process):
                         self.cluster(dna_reads)
                     if 'output_file' in self.config_dict :
                         self.num_dict[self.name+"index_list"]=self.index_list
+        self._finalize_worker_outputs()
         self.q_output.put(self.num_dict)
 
 
