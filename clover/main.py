@@ -351,6 +351,15 @@ class MyProcess(Process):
                             self.index_list.append((dna_index,self.ref_dict[fin_align[0]][0]))
                         else:
                             self.ref_dict[fin_align[0]].append(dna_tag)
+
+                        if fin_route is not None:
+                            self._record_routing_hint(
+                                fin_align[0],
+                                dna_str,
+                                fin_route[0],
+                                fin_align[1],
+                                query_shift=fin_route[1],
+                            )
                         
                         if self.align_swicth is True:
                             error_list = []
