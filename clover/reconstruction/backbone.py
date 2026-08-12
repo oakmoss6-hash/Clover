@@ -1,4 +1,4 @@
-"""Truth-blind reconstruction-backbone selection for Clover clusters."""
+"""Truth-blind reconstruction-backbone selection."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ from typing import Literal
 
 
 BackbonePolicy = Literal["core", "support_length", "max_span"]
+SUPPORTED_BACKBONES = ("core", "support_length", "max_span")
 
 
-def _validate_sequence_weights(sequence_weights: Mapping[str, int]) -> None:
+def _validate(sequence_weights: Mapping[str, int]) -> None:
     if not sequence_weights:
         raise ValueError("cannot select a backbone from an empty cluster")
     for sequence, weight in sequence_weights.items():
@@ -20,14 +21,15 @@ def _validate_sequence_weights(sequence_weights: Mapping[str, int]) -> None:
 
 
 def weighted_median_length(sequence_weights: Mapping[str, int]) -> float:
-    """Return the read-count-weighted median observed sequence length."""
-    _validate_sequence_weights(sequence_weights)
+    """Read-count-weighted median observed sequence length."""
+    _validate(sequence_weights)
     length_weights: dict[int, int] = {}
-    total_weight = 0
+    total = 0
     for sequence, weight in sequence_weights.items():
-        length = len(sequence)
-        length_weights[length] = length_weights.get(length, 0) + weight
-        total_weight += weight
+        length_weights[len(sequence)] = (
+            length_weights.get(len(sequence), 0) + weight
+        )
+        total += weight
 
     def observation_at(rank: int) -> int:
         cumulative = 0
@@ -35,13 +37,14 @@ def weighted_median_length(sequence_weights: Mapping[str, int]) -> float:
             cumulative += length_weights[length]
             if cumulative >= rank:
                 return length
-        raise RuntimeError("weighted median length calculation failed")
+        raise RuntimeError("weighted median calculation failed")
 
-    if total_weight % 2:
-        return float(observation_at(total_weight // 2 + 1))
-    lower = observation_at(total_weight // 2)
-    upper = observation_at(total_weight // 2 + 1)
-    return (lower + upper) / 2.0
+    if total % 2:
+        return float(observation_at(total // 2 + 1))
+    return (
+        observation_at(total // 2)
+        + observation_at(total // 2 + 1)
+    ) / 2.0
 
 
 def select_backbone(
@@ -50,22 +53,8 @@ def select_backbone(
     core_sequence: str,
     policy: BackbonePolicy | str = "core",
 ) -> str:
-    """
-    Select a reconstruction coordinate backbone without reference truth.
-
-    ``core`` preserves the historical Clover/CASPR behavior.
-
-    ``support_length`` first selects the most abundant observed sequence.
-    If several sequences share the maximum multiplicity, it chooses the one
-    whose length is closest to the read-count-weighted median cluster length.
-    Remaining ties preserve first-observed mapping order.
-
-    ``max_span`` is an experimental policy that selects the longest observed
-    sequence, then higher multiplicity, then first-observed order.  It is
-    retained for generality experiments and is not assumed to be the final
-    production default.
-    """
-    _validate_sequence_weights(sequence_weights)
+    """Choose a backbone using only observed cluster evidence."""
+    _validate(sequence_weights)
     if core_sequence not in sequence_weights:
         raise ValueError("core_sequence must be represented in cluster reads")
 
@@ -77,13 +66,12 @@ def select_backbone(
     if policy == "support_length":
         maximum_weight = max(weight for _, weight in items)
         candidates = [
-            (index, sequence, weight)
+            (index, sequence)
             for index, (sequence, weight) in enumerate(items)
             if weight == maximum_weight
         ]
         if len(candidates) == 1:
             return candidates[0][1]
-
         center = weighted_median_length(sequence_weights)
         return min(
             candidates,
@@ -104,6 +92,6 @@ def select_backbone(
         )[1][0]
 
     raise ValueError(
-        "unknown backbone policy: "
-        f"{policy!r}; expected core, support_length, or max_span"
+        f"unknown backbone policy: {policy!r}; "
+        f"expected one of {', '.join(SUPPORTED_BACKBONES)}"
     )
