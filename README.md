@@ -1,8 +1,8 @@
-# Clover with Multi-Read Global Reconstruction
+# Clover with Reed
 
 This repository is a fork of [Guanjinqu/Clover](https://github.com/Guanjinqu/Clover), extended with an optional **cluster-level multi-read global reconstruction** stage for DNA-storage sequencing data.
 
-The original Clover algorithm is responsible for fast clustering. The reconstruction extension does **not** replace Clover routing. Instead, it observes the reads that Clover has already assigned to each cluster, compresses exact duplicates, globally aligns the unique sequences to one shared backbone, and produces one weighted consensus sequence per cluster.
+The original Clover algorithm is responsible for fast clustering. Reed does **not** replace Clover routing. Instead, it observes the reads that Clover has already assigned to each cluster, compresses exact duplicates, globally aligns the unique sequences to one shared backbone, and produces one weighted consensus sequence per cluster.
 
 ## What this fork adds
 
@@ -190,7 +190,7 @@ A source strand counts as recovered when at least one output sequence is exactly
 | Output used for recovery | Exact strands recovered | Recovery rate |
 |---|---:|---:|
 | Clover routing cores | 48,703 / 72,000 | 67.6431% |
-| Clover + multi-read reconstruction | **71,823 / 72,000** | **99.7542%** |
+| Clover + Reed | **71,823 / 72,000** | **99.7542%** |
 | Net improvement | **+23,120 strands** | **+32.1111 percentage points** |
 
 More specifically, reconstruction recovered 23,175 source strands that were absent from the exact routing-core set, while 55 strands present in the core set were absent from the final consensus set.
@@ -256,4 +256,4 @@ For the original Clover clustering algorithm, please cite:
 
 > Qu G, Yan Z, Wu H. **Clover: tree structure-based efficient DNA clustering for DNA-based data storage.** Briefings in Bioinformatics. 2022;23(5):bbac336.
 
-If you use the reconstruction extension in this fork, please also cite the corresponding reconstruction work once its citation is available.
+If you use Reed in this fork, please also cite the corresponding Reed work once its citation is available.
