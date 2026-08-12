@@ -127,6 +127,10 @@ class MyProcess(Process):
         # Disabled by default so historical Clover behavior is unchanged.
         self.capture_routing_hints = False
         self.routing_hints = {}
+
+        # Phase 14: passive reconstruction-state observer.
+        # Disabled by default and never participates in Clover routing.
+        self.cluster_membership_observer = None
         self.now_clust_threshold = self.config_dict['now_clust_threshold']
         self.read_len= self.config_dict['read_len']  
         self.dna_tree_nums = self.config_dict['end_tree_len']
@@ -191,6 +195,25 @@ class MyProcess(Process):
         )
 
 
+    def _record_cluster_membership(
+        self,
+        core_index,
+        sequence,
+        *,
+        is_new_core=False,
+    ):
+        """Record an already-decided Clover cluster membership."""
+        observer = self.cluster_membership_observer
+        if observer is None:
+            return
+
+        observer(
+            core_index=core_index,
+            sequence=sequence,
+            is_new_core=is_new_core,
+        )
+
+
     def cluster(self,read):
         """Clover's clustering function
 
@@ -238,6 +261,10 @@ class MyProcess(Process):
                     dna_str,
                     "front",
                     a_align[1],
+                )
+                self._record_cluster_membership(
+                    a_align[0],
+                    dna_str,
                 )
 
                 if self.align_swicth is True:  #If global comparison is done, global comparison is started after matching.
@@ -287,6 +314,10 @@ class MyProcess(Process):
                     dna_str,
                     "back",
                     b_align[1],
+                )
+                self._record_cluster_membership(
+                    b_align[0],
+                    dna_str,
                 )
 
                 if self.align_swicth is True:
@@ -360,6 +391,11 @@ class MyProcess(Process):
                                 fin_align[1],
                                 query_shift=fin_route[1],
                             )
+
+                        self._record_cluster_membership(
+                            fin_align[0],
+                            dna_str,
+                        )
                         
                         if self.align_swicth is True:
                             error_list = []
@@ -400,6 +436,11 @@ class MyProcess(Process):
                             self.ref_list[dna_num]=dna_str
                         self.ref_dict[dna_num]=[dna_tag]
                         self._export_initial_core(dna_tag,dna_tag,dna_str)
+                        self._record_cluster_membership(
+                            dna_num,
+                            dna_str,
+                            is_new_core=True,
+                        )
                         self.a_tree.insert(dna_a_str,dna_num)
                         self.b_tree.insert(dna_b_str,dna_num)
                         self.c_tree.insert(dna_str[self.fuzz_list[0]-i:self.fuzz_list[0]+self.fuzz_list[2]-i],dna_num)
