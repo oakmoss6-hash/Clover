@@ -205,6 +205,7 @@ class MyProcess(Process):
         core_index,
         sequence,
         *,
+        read_id=None,
         is_new_core=False,
     ):
         """Record an already-decided Clover cluster membership."""
@@ -215,6 +216,7 @@ class MyProcess(Process):
         observer(
             core_index=core_index,
             sequence=sequence,
+            read_id=read_id,
             is_new_core=is_new_core,
         )
 
@@ -298,6 +300,7 @@ class MyProcess(Process):
                 self._record_cluster_membership(
                     a_align[0],
                     dna_str,
+                    read_id=dna_tag,
                 )
 
                 if self.align_swicth is True:  #If global comparison is done, global comparison is started after matching.
@@ -351,6 +354,7 @@ class MyProcess(Process):
                 self._record_cluster_membership(
                     b_align[0],
                     dna_str,
+                    read_id=dna_tag,
                 )
 
                 if self.align_swicth is True:
@@ -428,6 +432,7 @@ class MyProcess(Process):
                         self._record_cluster_membership(
                             fin_align[0],
                             dna_str,
+                            read_id=dna_tag,
                         )
                         
                         if self.align_swicth is True:
@@ -472,6 +477,7 @@ class MyProcess(Process):
                         self._record_cluster_membership(
                             dna_num,
                             dna_str,
+                            read_id=dna_tag,
                             is_new_core=True,
                         )
                         self.a_tree.insert(dna_a_str,dna_num)

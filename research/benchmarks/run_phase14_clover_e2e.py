@@ -339,6 +339,8 @@ def collect_reconstruction(
     total_raw = 0
     total_unique = 0
     total_pairwise = 0
+    total_singletons = 0
+    total_multi_unique = 0
 
     for name in names:
         output = outputs[name]
@@ -355,6 +357,12 @@ def collect_reconstruction(
         pairwise_count = output[
             name + "reconstruction_pairwise_alignment_count"
         ]
+        singleton_count = output[
+            name + "reconstruction_singleton_cluster_count"
+        ]
+        multi_unique_count = output[
+            name + "reconstruction_multi_unique_cluster_count"
+        ]
         worker_rows = output[
             name + "reconstruction_results"
         ]
@@ -363,6 +371,8 @@ def collect_reconstruction(
         total_raw += raw_count
         total_unique += unique_count
         total_pairwise += pairwise_count
+        total_singletons += singleton_count
+        total_multi_unique += multi_unique_count
 
         worker_details.append(
             {
@@ -372,6 +382,8 @@ def collect_reconstruction(
                 "raw_clustered_reads": raw_count,
                 "unique_sequences": unique_count,
                 "pairwise_alignments": pairwise_count,
+                "singleton_clusters": singleton_count,
+                "multi_unique_clusters": multi_unique_count,
             }
         )
 
@@ -413,6 +425,8 @@ def collect_reconstruction(
         "raw_clustered_reads": total_raw,
         "unique_sequences": total_unique,
         "pairwise_alignments": total_pairwise,
+        "singleton_clusters": total_singletons,
+        "multi_unique_clusters": total_multi_unique,
     }
 
 
@@ -435,6 +449,23 @@ def main():
         records.append(
             (read_id, sequence)
         )
+
+    # Match Clover's current input eligibility guard:
+    # len(sequence) >= read_len_min and no ambiguous N.
+    saved_argv = sys.argv[:]
+    sys.argv = [saved_argv[0]]
+    try:
+        probe = MyProcess("phase14-config-probe", [], None)
+        read_len_min = probe.config_dict["read_len_min"]
+    finally:
+        sys.argv = saved_argv
+
+    eligible_reads = sum(
+        1
+        for _, sequence in records
+        if len(sequence) >= read_len_min
+        and "N" not in sequence
+    )
 
     names, shards, invalid_prefix_reads = (
         partition_records(
@@ -518,12 +549,28 @@ def main():
     U = reconstruction["unique_sequences"]
     C = reconstruction["cluster_count"]
     A = reconstruction["pairwise_alignments"]
+    singleton_clusters = reconstruction["singleton_clusters"]
+    multi_unique_clusters = reconstruction["multi_unique_clusters"]
 
     summary = {
         "phase": "14.2B",
         "input": str(Path(args.input)),
         "max_reads": args.max_reads,
         "processed_reads": len(records),
+        "eligible_reads": eligible_reads,
+        "below_eligibility_filter": (
+            len(records) - eligible_reads
+        ),
+        "assigned_reads": M,
+        "eligible_unassigned_reads": (
+            eligible_reads - M
+        ),
+        "assignment_rate_of_processed": (
+            M / len(records) if records else 0.0
+        ),
+        "assignment_rate_of_eligible": (
+            M / eligible_reads if eligible_reads else 0.0
+        ),
         "workers": args.workers,
         "backend": args.backend,
         "backbone_policy": args.backbone_policy,
@@ -545,6 +592,11 @@ def main():
         "clustered_raw_reads_M": M,
         "unique_sequences_U": U,
         "pairwise_alignments_A": A,
+        "singleton_cluster_count": singleton_clusters,
+        "multi_unique_cluster_count": multi_unique_clusters,
+        "singleton_cluster_rate": (
+            singleton_clusters / C if C else 0.0
+        ),
         "expected_pairwise_U_minus_C": U - C,
         "pairwise_invariant_ok": A == U - C,
         "duplicate_compression_M_over_U": (
@@ -625,6 +677,22 @@ def main():
         f"{summary['reconstruction_overhead_seconds']:.4f}s",
     )
     print(
+        "eligible reads:",
+        f"{eligible_reads:,}",
+    )
+    print(
+        "below eligibility filter:",
+        f"{len(records) - eligible_reads:,}",
+    )
+    print(
+        "eligible but unassigned:",
+        f"{eligible_reads - M:,}",
+    )
+    print(
+        "assignment / eligible:",
+        f"{M / eligible_reads:.2%}" if eligible_reads else "n/a",
+    )
+    print(
         "clusters C:",
         f"{C:,}",
     )
@@ -639,6 +707,15 @@ def main():
     print(
         "M/U:",
         f"{summary['duplicate_compression_M_over_U']:.4f}",
+    )
+    print(
+        "singleton clusters:",
+        f"{singleton_clusters:,}",
+        f"({singleton_clusters / C:.2%})" if C else "",
+    )
+    print(
+        "multi-unique clusters:",
+        f"{multi_unique_clusters:,}",
     )
     print(
         "pairwise A:",

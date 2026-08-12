@@ -150,6 +150,36 @@ class TestCloverClusterStateAdapter(unittest.TestCase):
             ["r1", "r2", "r3"],
         )
 
+    def test_clover_membership_observer_receives_read_id(self):
+        process = make_process()
+        calls = []
+
+        def observer(**kwargs):
+            calls.append(kwargs)
+
+        process.cluster_membership_observer = observer
+
+        configure_first_read_as_new_core(process)
+        process.cluster("ERR1816980.123 AAAAAA")
+
+        self.assertEqual(len(calls), 1)
+
+        self.assertEqual(
+            calls[0]["read_id"],
+            "ERR1816980.123",
+        )
+        self.assertEqual(
+            calls[0]["sequence"],
+            "AAAAAA",
+        )
+        self.assertEqual(
+            calls[0]["core_index"],
+            1,
+        )
+        self.assertTrue(
+            calls[0]["is_new_core"],
+        )
+
     def test_observer_disabled_preserves_clover(self):
         process = make_process()
 

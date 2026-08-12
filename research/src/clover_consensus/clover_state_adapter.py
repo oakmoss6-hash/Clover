@@ -24,6 +24,7 @@ class CloverClusterStateAdapter:
         *,
         core_index: int,
         sequence: str,
+        read_id: str | None = None,
         is_new_core: bool = False,
     ) -> None:
         if is_new_core:

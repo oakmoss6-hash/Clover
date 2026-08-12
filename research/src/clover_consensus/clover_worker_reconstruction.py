@@ -46,11 +46,15 @@ class CloverWorkerReconstructor:
         *,
         core_index: int,
         sequence: str,
+        read_id: str | None = None,
         is_new_core: bool = False,
     ) -> None:
+        # read_id is intentionally ignored by reconstruction itself.
+        # It exists for passive downstream evaluation/auditing.
         self.adapter.record_membership(
             core_index=core_index,
             sequence=sequence,
+            read_id=read_id,
             is_new_core=is_new_core,
         )
 
