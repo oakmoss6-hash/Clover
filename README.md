@@ -80,7 +80,7 @@ The default experimental configuration uses the Clover routing core as the backb
 
 ### 2.3 Star-shaped global alignment
 
-Let a cluster contain \(U_i\) unique sequences.
+Let a cluster contain $U_i$ unique sequences.
 
 Reed does **not** perform all-pairs alignment.
 
@@ -100,17 +100,17 @@ read 3 ---- backbone ---- read 4
 
 Therefore, the number of pairwise global alignments for one cluster is:
 
-\[
+$$
 A_i = U_i - 1
-\]
+$$
 
-For all \(C\) clusters, if the total number of unique sequences is \(U\):
+For all $C$ clusters, if the total number of unique sequences is $U$:
 
-\[
+$$
 A = \sum_{i=1}^{C}(U_i-1)=U-C
-\]
+$$
 
-This avoids the \(O(U_i^2)\) number of pairwise comparisons required by an all-pairs strategy.
+This avoids the $O(U_i^2)$ number of pairwise comparisons required by an all-pairs strategy.
 
 ### 2.4 Global alignment backends
 
@@ -162,10 +162,10 @@ Therefore, Reed is designed as a **cluster-level reconstruction method**, not a 
 
 Assume:
 
-- \(M\): number of raw reads entering reconstruction,
-- \(U\): number of unique sequences after duplicate compression,
-- \(C\): number of Clover clusters,
-- \(L\): typical sequence length.
+- $M$: number of raw reads entering reconstruction,
+- $U$: number of unique sequences after duplicate compression,
+- $C$: number of Clover clusters,
+- $L$: typical sequence length.
 
 Reed performs:
 
@@ -179,13 +179,13 @@ consensus generation         -> one profile scan per cluster
 
 The **number of pairwise global alignments grows linearly with the number of unique sequences**:
 
-\[
+$$
 A = U-C
-\]
+$$
 
 This is the main complexity property of the current implementation.
 
-The total runtime is not strictly \(O(U)\) in all possible cases because the cost of each global alignment also depends on sequence length, edit distance, and the selected alignment backend. Reed's design specifically targets DNA-storage clusters where sequence length is limited and within-cluster edit distance is expected to be small.
+The total runtime is not strictly $O(U)$ in all possible cases because the cost of each global alignment also depends on sequence length, edit distance, and the selected alignment backend. Reed's design specifically targets DNA-storage clusters where sequence length is limited and within-cluster edit distance is expected to be small.
 
 ---
 
@@ -225,20 +225,20 @@ Observed reconstruction statistics:
 
 | Metric | Result |
 |---|---:|
-| Clover clusters \(C\) | 153,813 |
-| Raw reads entering Reed \(M\) | 13,402,459 |
-| Unique sequences after compression \(U\) | 3,963,397 |
-| Pairwise global alignments \(A\) | 3,809,584 |
-| Expected \(U-C\) | 3,809,584 |
-| \(A = U-C\) | **Yes** |
+| Clover clusters $C$ | 153,813 |
+| Raw reads entering Reed $M$ | 13,402,459 |
+| Unique sequences after compression $U$ | 3,963,397 |
+| Pairwise global alignments $A$ | 3,809,584 |
+| Expected $U-C$ | 3,809,584 |
+| $A = U-C$ | **Yes** |
 | End-to-end wall-clock time | about **79.96 s** |
 | Workers | 16 |
 
 The large-scale run therefore confirms that the implementation follows the intended alignment-count relation:
 
-\[
+$$
 A=U-C
-\]
+$$
 
 and does not fall back to an all-pairs alignment path.
 
@@ -278,7 +278,7 @@ Thus many repeated observations contribute through multiplicity without requirin
 
 ### 6.3 Avoidance of all-pairs multiple alignment
 
-For a cluster with \(U_i\) unique sequences:
+For a cluster with $U_i$ unique sequences:
 
 ```text
 all-pairs strategy:
@@ -366,7 +366,7 @@ A publishable evaluation should include additional real DNA-storage datasets, si
 
 ### 7.7 Alignment count is linear, but alignment cost is data-dependent
 
-The number of alignments is \(U-C\), but the runtime of each WFA/NW/Edlib call depends on sequence length and divergence.
+The number of alignments is $U-C$, but the runtime of each WFA/NW/Edlib call depends on sequence length and divergence.
 
 Very long sequences or high-error clusters may therefore have different scaling behavior from the current low-error DNA-storage setting.
 
@@ -376,7 +376,7 @@ Very long sequences or high-error clusters may therefore have different scaling 
 
 The next stage focuses on improving Reed without losing its low alignment-count property.
 
-### Priority 1 — Better backbone selection without \(O(U^2)\)
+### Priority 1 — Better backbone selection without $O(U^2)$
 
 Develop a more robust backbone score using inexpensive cluster statistics such as:
 
@@ -410,7 +410,7 @@ selective second pass
 final consensus
 ```
 
-A fixed two-pass design would still require only a constant multiple of \(U\) alignments rather than \(O(U^2)\).
+A fixed two-pass design would still require only a constant multiple of $U$ alignments rather than $O(U^2)$.
 
 ### Priority 3 — Confidence-aware reconstruction
 
@@ -528,7 +528,7 @@ python -m clover \
   --consensus-output consensus.tsv
 ```
 
-For `-P N`, Clover uses \(4^N\) worker partitions. For example:
+For `-P N`, Clover uses $4^N$ worker partitions. For example:
 
 ```text
 -P 0 -> 1 worker
@@ -641,6 +641,6 @@ The current implementation demonstrates three main results:
 
 1. **Cluster-level multi-read reconstruction works on large real DNA-storage data.**
 2. **Exact recovery on the current labeled ERR1816980 evaluation improves from 67.64% using Clover routing cores to 99.75% using Reed consensus.**
-3. **The number of pairwise global alignments is exactly \(U-C\), avoiding an all-pairs \(O(U^2)\) alignment-count design.**
+3. **The number of pairwise global alignments is exactly $U-C$, avoiding an all-pairs $O(U^2)$ alignment-count design.**
 
 The next research stage is not to increase code complexity, but to improve backbone robustness, indel handling, confidence modeling and experimental validation while preserving the low alignment-count property.
