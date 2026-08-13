@@ -1,3 +1,0 @@
-file,file_size_bytes,read_count,unique_sequence_count,exact_duplicate_count,duplicate_ratio,min_length,median_length,max_length,all_same_length,alphabet
-example/example_tag_data.txt,917,6,3,3,0.5,150,150.0,150,True,ACGT
-example/example_index_data.txt,917,6,3,3,0.5,150,150.0,150,True,ACGT

@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
 setup(name='dna-clover',
       version='1.2',
@@ -7,8 +7,13 @@ setup(name='dna-clover',
       author='Guanjin qu',
       author_email='guanjinqu@tju.edu.cn',
       license='GNU',
-      packages=['clover','tests'],
+      packages=find_packages(
+          include=[
+              'clover',
+              'clover.*',
+          ]
+      ),
       zip_safe=False,
       entry_points = {
-        'console_scripts': ['clover = clover.main:main'],
+        'console_scripts': ['clover = clover.__main__:main'],
     })

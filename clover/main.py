@@ -10,17 +10,19 @@ import os
 from pathlib import Path
 import time
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable=None, *args, **kwargs):
+        return iterable
 
-from clover import align as ag
 from clover import load_config as lc
 from clover import tree as tr
 from clover.input_io import iter_clover_records
-from clover.reconstruction import (
+from clover.reed import (
     CloverWorkerReconstructor,
     write_reconstruction_output,
 )
-from clover.routing import RoutingHint
 
 class MyProcess(Process):
     """Process Class
@@ -59,13 +61,7 @@ class MyProcess(Process):
         Cluster_size_threshold: Minimum threshold for clusters
         type: int
 
-        ref_list: List of core sequences
-        type: list
-
         ref_dict: Dict of core sequences
-        type: dict
-
-        ref_error_dict: Dict of core sequence error messages
         type: dict
 
         num_dict: List of statistical information
@@ -95,9 +91,6 @@ class MyProcess(Process):
         tag_nums: Number of labels
         type: int
 
-        align_swicth: Global Matching Switch
-        type: bool
-
         fuzz_tree_nums: Horizontal drift threshold
         type: int
 
@@ -121,17 +114,10 @@ class MyProcess(Process):
         if self.config_dict['other_tree_nums'] == 2 :
             self.d_tree = tr.Trie()
         self.Cluster_size_threshold = self.config_dict['Cluster_size_threshold']
-        self.ref_list={}    
         self.ref_dict={}     
-        self.ref_error_dict={}
         self.num_dict={}
         self.tag_dict={}
         self.index_list=[]   
-
-        # Optional passive routing metadata capture.
-        # Disabled by default so historical Clover behavior is unchanged.
-        self.capture_routing_hints = False
-        self.routing_hints = {}
 
         # Optional reconstruction-state observer. It receives only routing
         # decisions already made by Clover and never participates in routing.
@@ -146,7 +132,6 @@ class MyProcess(Process):
         self.fuzz_list = [self.config_dict['thd_tree_loc'],self.config_dict['four_tree_loc'],self.config_dict['other_tree_len']] 
         self.loc_nums = self.config_dict['Vertical_drift'] 
         self.tag_nums = self.config_dict['tag_nums']     
-        self.align_swicth= self.config_dict['align_fuc'] 
         self.fuzz_tree_nums= self.config_dict['Horizontal_drift']   
         self.h_index=self.config_dict['h_index_nums']
         self.e_index=self.config_dict['e_index_nums']
@@ -179,30 +164,6 @@ class MyProcess(Process):
         if self.core_export_file is None:
             return
         self.core_export_file.write(f"{cluster_id}\t{core_read_id}\t{core_sequence}\n")
-
-
-    def _record_routing_hint(
-        self,
-        core_index,
-        sequence,
-        tree_kind,
-        horizontal_drifts,
-        query_shift=0,
-    ):
-        """Record already-computed Clover routing information."""
-        if not self.capture_routing_hints:
-            return
-
-        cluster_hints = self.routing_hints.setdefault(core_index, {})
-        cluster_hints.setdefault(
-            sequence,
-            RoutingHint(
-                tree_kind=tree_kind,
-                horizontal_drifts=horizontal_drifts,
-                query_shift=query_shift,
-            ),
-        )
-
 
     def _record_cluster_membership(
         self,
@@ -295,53 +256,12 @@ class MyProcess(Process):
                 else:
                     if not self.config_dict.get('reconstruct'):
                         self.ref_dict[a_align[0]].append(dna_tag)
-                
-                self._record_routing_hint(
-                    a_align[0],
-                    dna_str,
-                    "front",
-                    a_align[1],
-                )
                 self._record_cluster_membership(
                     a_align[0],
                     dna_str,
                     read_id=dna_tag,
                 )
 
-                if self.align_swicth is True:  #If global comparison is done, global comparison is started after matching.
-                    error_list = []
-                    align_list=a_align
-                    if self.config_dict["now_align_alg"] == True:
-                        error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                    else:
-                        if dna_str_num==self.read_len :
-                            if self.ref_list[align_list[0]] == dna_str:
-                                pass
-                            else:
-                                error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                        
-                    for line in error_list:
-
-                        if align_list[0] in self.ref_error_dict : 
-                            self.ref_error_dict[align_list[0]]["nums"]=self.ref_error_dict[align_list[0]]["nums"] + 1
-                            if line[0] in  self.ref_error_dict[align_list[0]]:
-                                self.ref_error_dict[align_list[0]][line[0]]=self.ref_error_dict[align_list[0]][line[0]]+1
-                            else:
-                                self.ref_error_dict[align_list[0]][line[0]]=1
-                            if self.ref_error_dict[align_list[0]][line[0]]/self.ref_error_dict[align_list[0]]["nums"] >0.5 and self.ref_error_dict[a_align[0]][line[0]]>5 :
-                                now_read=self.ref_list[align_list[0]][:line[0]]+line[1]+self.ref_list[align_list[0]][line[0]+1:]
-
-                                self.a_tree.insert(now_read[:self.dna_tree_nums],align_list[0])
-                                self.ref_list[align_list[0]]=now_read
-
-                                self.ref_error_dict[align_list[0]]={}
-                                self.ref_error_dict[align_list[0]]["nums"]=1
-                                self.ref_error_dict[align_list[0]][line[0]]=1                                   
-                        else:
-                            self.ref_error_dict[align_list[0]]={}
-                            self.ref_error_dict[align_list[0]]["nums"]=1
-                            self.ref_error_dict[align_list[0]][line[0]]=1
-                        
             elif self.b_tree.fuzz_fin(dna_b_str,self.config_dict['tree_threshold'])[1] < self.fuzz_tree_nums:
                 b_align=self.b_tree.fuzz_fin(dna_b_str,self.config_dict['tree_threshold'])
                 
@@ -350,57 +270,16 @@ class MyProcess(Process):
                 else:
                     if not self.config_dict.get('reconstruct'):
                         self.ref_dict[b_align[0]].append(dna_tag)
-
-                self._record_routing_hint(
-                    b_align[0],
-                    dna_str,
-                    "back",
-                    b_align[1],
-                )
                 self._record_cluster_membership(
                     b_align[0],
                     dna_str,
                     read_id=dna_tag,
                 )
 
-                if self.align_swicth is True:
-                    error_list = []
-                    align_list=b_align
-                    if self.config_dict["now_align_alg"] == True:
-                        error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                    else:
-                        if dna_str_num==self.read_len :
-                            if self.ref_list[align_list[0]] == dna_str:
-                                pass
-                            else:
-                                error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                        
-                    for line in error_list:
-                        if align_list[0] in self.ref_error_dict : 
-                            self.ref_error_dict[align_list[0]]["nums"]=self.ref_error_dict[align_list[0]]["nums"] + 1
-                            if line[0] in  self.ref_error_dict[align_list[0]]:
-                                self.ref_error_dict[align_list[0]][line[0]]=self.ref_error_dict[align_list[0]][line[0]]+1
-                            else:
-                                self.ref_error_dict[align_list[0]][line[0]]=1
-                            if self.ref_error_dict[align_list[0]][line[0]]/self.ref_error_dict[align_list[0]]["nums"] >0.5 and self.ref_error_dict[a_align[0]][line[0]]>5 :
-                                now_read=self.ref_list[align_list[0]][:line[0]]+line[1]+self.ref_list[align_list[0]][line[0]+1:]
-
-                                self.a_tree.insert(now_read[:self.dna_tree_nums],align_list[0])
-                                self.ref_list[align_list[0]]=now_read
-
-                                self.ref_error_dict[align_list[0]]={}
-                                self.ref_error_dict[align_list[0]]["nums"]=1
-                                self.ref_error_dict[align_list[0]][line[0]]=1                                   
-                        else:
-                            self.ref_error_dict[align_list[0]]={}
-                            self.ref_error_dict[align_list[0]]["nums"]=1
-                            self.ref_error_dict[align_list[0]][line[0]]=1
-                
             else:
                 #If the trees at the first and last ends cannot be matched, try the middle tree.
                 if dna_str_num >= self.config_dict['read_len_min'] :
                     fin_align=["",1000]
-                    fin_route=None
                     for i in self.loc_nums:
                         if self.h_index == 0 :
                             dna_c_str=dna_str[self.fuzz_list[0]-i:self.fuzz_list[0]+self.fuzz_list[2]-i]
@@ -409,7 +288,6 @@ class MyProcess(Process):
                         c_align = self.c_tree.fuzz_fin(dna_c_str,self.config_dict['tree_threshold']) 
                         if c_align[1]<fin_align[1] :
                                 fin_align=c_align
-                                fin_route=("middle_c", i)
                         if self.config_dict['other_tree_nums'] == 2 :
                             if self.e_index == 0 :
                                 dna_d_str=dna_str[self.read_len-2-self.fuzz_list[1]-i:self.read_len-2-self.fuzz_list[1]+self.fuzz_list[2]-i]
@@ -418,7 +296,6 @@ class MyProcess(Process):
                             d_align = self.d_tree.fuzz_fin(dna_d_str,self.config_dict['tree_threshold'])
                             if d_align[1]<fin_align[1] :
                                 fin_align=d_align
-                                fin_route=("middle_d", i)
 
                     if fin_align[1] < self.fuzz_tree_nums :
                         if self.config_dict['Virtual_mode'] == False:
@@ -427,58 +304,13 @@ class MyProcess(Process):
                             if not self.config_dict.get('reconstruct'):
                                 self.ref_dict[fin_align[0]].append(dna_tag)
 
-                        if fin_route is not None:
-                            self._record_routing_hint(
-                                fin_align[0],
-                                dna_str,
-                                fin_route[0],
-                                fin_align[1],
-                                query_shift=fin_route[1],
-                            )
-
                         self._record_cluster_membership(
                             fin_align[0],
                             dna_str,
                             read_id=dna_tag,
                         )
                         
-                        if self.align_swicth is True:
-                            error_list = []
-                            align_list=fin_align
-                            if self.config_dict["now_align_alg"] == True:
-                                error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                            else:
-                                if dna_str_num==self.read_len :
-                                    if self.ref_list[align_list[0]] == dna_str:
-                                        pass
-                                    else:
-                                        error_list=ag.global_align(self.ref_list[align_list[0]],dna_str)
-                                
-                            for line in error_list:
-                                if align_list[0] in self.ref_error_dict : 
-                                    self.ref_error_dict[align_list[0]]["nums"]=self.ref_error_dict[align_list[0]]["nums"] + 1
-                                    if line[0] in  self.ref_error_dict[align_list[0]]:
-                                        self.ref_error_dict[align_list[0]][line[0]]=self.ref_error_dict[align_list[0]][line[0]]+1
-                                    else:
-                                        self.ref_error_dict[align_list[0]][line[0]]=1
-                                    if self.ref_error_dict[align_list[0]][line[0]]/self.ref_error_dict[align_list[0]]["nums"] >0.5 and self.ref_error_dict[a_align[0]][line[0]]>5 :
-                                        now_read=self.ref_list[align_list[0]][:line[0]]+line[1]+self.ref_list[align_list[0]][line[0]+1:]
-
-                                        self.a_tree.insert(now_read[:self.dna_tree_nums],align_list[0])
-                                        self.ref_list[align_list[0]]=now_read
-
-                                        self.ref_error_dict[align_list[0]]={}
-                                        self.ref_error_dict[align_list[0]]["nums"]=1
-                                        self.ref_error_dict[align_list[0]][line[0]]=1                                   
-                                else:
-                                    self.ref_error_dict[align_list[0]]={}
-                                    self.ref_error_dict[align_list[0]]["nums"]=1
-                                    self.ref_error_dict[align_list[0]][line[0]]=1
-
-                          
                     if fin_align[1] >= self.now_clust_threshold : #Add to core sequence set if conditions are met.
-                        if self.config_dict['align_fuc'] == True:
-                            self.ref_list[dna_num]=dna_str
                         self.ref_dict[dna_num]=[dna_tag]
                         self._export_initial_core(dna_tag,dna_tag,dna_str)
                         self._record_cluster_membership(
@@ -737,7 +569,7 @@ def all_permutations(items, length):
 def main():
     pass
 
-if __name__ == '__main__':
+def run_cli():
 
     #******************************************************************************************
     config_dict=lc.out_put_config()
@@ -911,3 +743,7 @@ if __name__ == '__main__':
         pass
 
     main()
+
+
+if __name__ == '__main__':
+    run_cli()

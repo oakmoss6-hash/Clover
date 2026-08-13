@@ -11,7 +11,6 @@ SHORT_OPTIONS = "-I:-L:-D:-V:-H:-T:-P:-O:-h"
 LONG_OPTIONS = [
     "help",
     "low",
-    "align",
     "no-fast",
     "no-tag",
     "stat",
@@ -25,6 +24,33 @@ LONG_OPTIONS = [
 
 RECONSTRUCTION_BACKENDS = ("wfa", "edlib", "nw")
 RECONSTRUCTION_BACKBONES = ("core", "support_length", "max_span")
+
+HELP_TEXT = """\
+Clover
+
+Options:
+  -h, --help                  Show this help message and exit.
+  -I, --input PATH            Input FASTQ, FASTA, or Clover text file.
+  -L LENGTH                   Expected read length.
+  -D LENGTH                   End-tree depth.
+  -V DRIFT                    Vertical drift setting.
+  -H DRIFT                    Horizontal drift threshold.
+  -T COUNT                    Expected tag count.
+  -P EXPONENT                 Process exponent: 0 uses one worker,
+                              N > 0 uses 4^N workers.
+  -O PREFIX                   Write original Clover cluster index output.
+  --no-fast                   Use lower-memory input mode.
+  --no-tag                    Use untagged input mode.
+  --low                       Use minimum-memory mode.
+  --stat                      Enable statistical mode.
+  --export-cluster-cores PATH Export initial routing cores.
+
+Reconstruction:
+  --reconstruct               Enable cluster-level multi-read reconstruction.
+  --reconstruct-backend NAME  Pairwise backend: wfa, edlib, or nw.
+  --reconstruct-backbone NAME Backbone policy: core, support_length, or max_span.
+  --consensus-output PATH     Consensus TSV output path.
+"""
 
 
 config_dict = {
@@ -44,14 +70,12 @@ config_dict = {
     "h_index_nums": 0,
     "e_index_nums": 0,
     "read_len_min": 0,
-    "align_fuc": False,
     "mmr_mode": False,
     "Virtual_mode": True,
     "fast_mode": True,
     "tag_mode": False,
     "Statistical_model": False,
     "same_tree_len": True,
-    "now_align_alg": False,
     "core_export_path": None,
     # Optional multi-read reconstruction.
     "reconstruct": False,
@@ -85,7 +109,8 @@ def out_put_config():
 
     for opt_name, opt_value in options:
         if opt_name in {"-h", "--help"}:
-            print("Please see README.md")
+            print(HELP_TEXT)
+            raise SystemExit(0)
         elif opt_name in {"-I", "--input"}:
             config_dict["input_path"] = opt_value
         elif opt_name == "-L":
@@ -107,8 +132,6 @@ def out_put_config():
             config_dict["processes_nums"] = int(opt_value)
         elif opt_name == "-O":
             config_dict["output_file"] = opt_value + ".txt"
-        elif opt_name == "--align":
-            config_dict["align_fuc"] = True
         elif opt_name == "--no-fast":
             config_dict["fast_mode"] = False
         elif opt_name == "--no-tag":
@@ -146,15 +169,10 @@ def out_put_config():
         elif opt_name == "--low":
             config_dict["mmr_mode"] = True
             config_dict["fast_mode"] = False
-            config_dict["align_fuc"] = False
             config_dict["Statistical_model"] = False
             config_dict["Virtual_mode"] = False
 
     if config_dict.get("reconstruct"):
-        if config_dict.get("align_fuc"):
-            raise ValueError(
-                "old --align and new --reconstruct are mutually exclusive"
-            )
         # Reconstruction is intentionally streaming: raw reads are not
         # preloaded into the parent's data_dict.
         config_dict["fast_mode"] = False

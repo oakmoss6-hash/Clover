@@ -1,152 +1,119 @@
-# Clover with Reed
+# Clover
 
-This repository is a fork of [Guanjinqu/Clover](https://github.com/Guanjinqu/Clover), extended with an optional **cluster-level multi-read global reconstruction** stage for DNA-storage sequencing data.
+Clover is a tree-structure-based DNA clustering tool for DNA data storage.
+This repository contains the original Clover clustering algorithm plus Reed,
+an optional cluster-level multi-read global reconstruction module.
 
-The original Clover algorithm is responsible for fast clustering. Reed does **not** replace Clover routing. Instead, it observes the reads that Clover has already assigned to each cluster, compresses exact duplicates, globally aligns the unique sequences to one shared backbone, and produces one weighted consensus sequence per cluster.
+The reconstruction module runs after Clover has determined cluster
+membership. It observes the reads already assigned to each cluster, compresses
+exact duplicate sequences into multiplicities, aligns unique sequences to one
+cluster backbone, and emits one weighted consensus sequence per cluster.
 
-## What this fork adds
+Bowtie, BLAST, source labels, and known reference strands are not part of the
+normal reconstruction algorithm.
 
-For a Clover cluster containing `M` raw reads and `U` unique sequences:
+## Clover Clustering
 
-1. Aggregate exact duplicates as `sequence -> multiplicity`.
-2. If `U = 1`, return the sequence directly with no alignment.
-3. Select one truth-blind reconstruction backbone.
-4. Globally align every other unique sequence to the backbone exactly once.
-5. Project all weighted evidence onto one shared coordinate profile.
+Clover routes reads through prefix, suffix, and middle trie searches with
+configurable drift thresholds. The clustering path is responsible for deciding
+which reads belong to each cluster and for producing Clover's original cluster
+statistics.
+
+Common clustering options:
+
+| Option | Description |
+|---|---|
+| `-I`, `--input` | Input FASTQ, FASTA, or Clover text file. |
+| `-L` | Expected read length. |
+| `-D` | End-tree depth. |
+| `-V` | Vertical drift setting. |
+| `-H` | Horizontal drift threshold. |
+| `-T` | Expected tag count. |
+| `-P` | Process exponent: `0` uses one worker, `N > 0` uses `4^N` workers. |
+| `-O` | Write original Clover cluster index output. |
+| `--no-tag` | Use untagged input mode. |
+| `--no-fast` | Use Clover's lower-memory input mode. |
+| `--low` | Use Clover's minimum-memory mode. |
+
+## Multi-Read Reconstruction
+
+Reconstruction is an optional downstream stage for cluster-level consensus
+calling. It does not replace Clover clustering and does not participate in
+routing decisions.
+
+For each cluster:
+
+1. Store observed read evidence as `sequence -> multiplicity`.
+2. Return singleton clusters directly without alignment.
+3. Select one truth-blind backbone.
+4. Globally align each non-backbone unique sequence once.
+5. Project weighted evidence onto a shared profile.
 6. Call a deterministic weighted consensus.
 
-Therefore a cluster performs exactly:
-
-```text
-U - 1
-```
-
-pairwise global alignments. Across `C` reconstructed clusters:
-
-```text
-A = sum(U_c - 1) = U - C
-```
-
-This avoids all-pairs sequence comparison inside a cluster.
-
-## Architecture
-
-```text
-FASTQ / FASTA / Clover TXT
-            |
-            v
-     streaming input
-            |
-            v
-      Clover routing
-            |
-            v
-  sequence -> multiplicity
-        (M -> U)
-            |
-       +----+----+
-       |         |
-     U = 1     U > 1
-       |         |
-  direct output  v
-          reconstruction backbone
-                  |
-                  v
-          U - 1 global alignments
-                  |
-                  v
-          shared weighted profile
-                  |
-                  v
-               consensus
-```
-
-Reconstruction mode uses streaming input by default so the complete raw read set is not preloaded into the parent process.
+For a cluster with `U` unique sequences, reconstruction performs exactly
+`U - 1` pairwise global alignments.
 
 ## Installation
 
-Clone this fork and install the dependencies from the repository root:
+Install from the repository root:
 
 ```bash
-git clone <YOUR-FORK-URL>
-cd Clover
-python -m venv .venv
-source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pip install .
 ```
 
-The production default uses `pywfa==0.5.1` for exact end-to-end Wavefront Alignment.
+The package installs `clover`; Reed is implemented in `clover.reed`.
 
-Optional backends:
+## Usage
+
+Run Clover clustering:
 
 ```bash
-python -m pip install edlib
+python -m clover --input reads.fastq -P 0
 ```
 
-`nw` is also available as a pure-Python correctness/reference backend and requires no additional package.
-
-## Quick start: Clover + reconstruction
+Run Clover clustering followed by reconstruction:
 
 ```bash
 python -m clover \
   --input reads.fastq \
-  -P 2 \
+  -P 0 \
   --reconstruct \
   --reconstruct-backend wfa \
-  --consensus-output consensus.tsv
+  --consensus-output clover_consensus.tsv
 ```
 
-`-P` follows the original Clover convention:
-
-```text
--P 0 -> 1 worker
--P 1 -> 4 workers
--P 2 -> 16 workers
-```
-
-### Reconstruction options
-
-| Option | Default | Description |
-|---|---|---|
-| `--reconstruct` | off | Enable cluster-level multi-read reconstruction. |
-| `--reconstruct-backend` | `wfa` | Pairwise backend: `wfa`, `edlib`, or `nw`. |
-| `--reconstruct-backbone` | `core` | Backbone policy: `core`, `support_length`, or `max_span`. |
-| `--consensus-output` | `clover_consensus.tsv` | Output TSV path. |
-
-The validated benchmark default is:
-
-```text
-backend  = wfa
-backbone = core
-```
-
-`--align` is the original Clover global-matching feature and is separate from the new reconstruction stage. `--align` and `--reconstruct` are mutually exclusive.
-
-## Input formats
-
-The reconstruction CLI accepts:
-
-### FASTQ
-
-Standard four-line FASTQ records.
-
-### FASTA
-
-Single- or multi-line FASTA records.
-
-### Clover text
-
-Two whitespace-separated columns:
+FASTQ, FASTA, and Clover text inputs are accepted. Clover text input uses two
+whitespace-separated columns:
 
 ```text
 read_id sequence
 ```
 
-Reads containing `N` or shorter than Clover's configured minimum length are filtered by the normal Clover processing path.
+Reads containing `N` or shorter than Clover's configured minimum length are
+filtered by Clover's normal processing path.
+
+## Reconstruction Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--reconstruct` | off | Enable cluster-level multi-read reconstruction. |
+| `--reconstruct-backend` | `wfa` | Pairwise global-alignment backend: `wfa`, `edlib`, or `nw`. |
+| `--reconstruct-backbone` | `core` | Backbone policy: `core`, `support_length`, or `max_span`. |
+| `--consensus-output` | `clover_consensus.tsv` | Consensus TSV output path. |
+
+## Alignment Backend
+
+The default backend is WFA through `pywfa==0.5.1`.
+
+`edlib` is supported as an optional backend when the Python package is
+installed. The `nw` backend is a pure-Python Needleman-Wunsch reference
+implementation and requires no additional package.
 
 ## Output
 
-`--consensus-output` writes one row per Clover output cluster:
+Reconstruction writes a TSV file with one row per reconstructed Clover
+cluster:
 
 ```text
 worker
@@ -159,101 +126,20 @@ unique_sequence_count
 pairwise_alignment_count
 ```
 
-The implementation checks the global invariant:
+The implementation verifies the global invariant:
 
 ```text
 pairwise_alignment_count = total_unique_sequences - cluster_count
 ```
 
-and raises an error if it is violated.
-
-## Full ERR1816980 result
-
-The following result was obtained with the full assembled ERR1816980 dataset used during development of this fork.
-
-| Metric | Value |
-|---|---:|
-| Input reads | 15,787,115 |
-| Original source strands | 72,000 |
-| Workers | 16 (`-P 2`) |
-| Clover output clusters | 153,813 |
-| Assigned reconstruction reads `M` | 13,402,459 |
-| Unique sequence evidence `U` | 3,963,397 |
-| Pairwise global alignments `A` | 3,809,584 |
-| Verified invariant | `A = U - C` |
-| End-to-end wall time | 140.26 s |
-
-### Exact distinct strand recovery
-
-A source strand counts as recovered when at least one output sequence is exactly identical to that source reference. Duplicate output clusters matching the same source strand are counted only once.
-
-| Output used for recovery | Exact strands recovered | Recovery rate |
-|---|---:|---:|
-| Clover routing cores | 48,703 / 72,000 | 67.6431% |
-| Clover + Reed | **71,823 / 72,000** | **99.7542%** |
-| Net improvement | **+23,120 strands** | **+32.1111 percentage points** |
-
-More specifically, reconstruction recovered 23,175 source strands that were absent from the exact routing-core set, while 55 strands present in the core set were absent from the final consensus set.
-
-> **Metric note:** `99.7542%` is an **exact distinct source-strand recovery rate**. It is not the same metric as Clover's clustering accuracy reported in the original paper.
-
-The wall-time number is a measurement from the development machine (WSL2, 24 logical CPUs) and should not be interpreted as a hardware-independent guarantee.
-
-## Reconstruction code layout
-
-```text
-clover/reconstruction/
-├── __init__.py     public reconstruction API
-├── alignment.py    WFA / Edlib / Needleman-Wunsch backends
-├── backbone.py     truth-blind backbone selection
-├── state.py        compact streaming cluster evidence
-├── reconstruct.py  shared profile and consensus algorithm
-└── worker.py       Clover multiprocessing integration and TSV output
-```
-
-Experimental simulation, diagnostics, baseline comparisons, and previous local-repair experiments remain research code and are not part of the production reconstruction path.
-
-## Original Clover usage
-
-The original clustering options remain available. Common options include:
-
-| Option | Description |
-|---|---|
-| `-I`, `--input` | Input file. |
-| `-L` | Expected read length. |
-| `-P` | Clover process exponent (`4^P` workers for `P > 0`). |
-| `-D` | End-tree depth. |
-| `-V` | Vertical drift setting. |
-| `-H` | Horizontal drift setting. |
-| `--no-tag` | Untagged input mode. |
-| `--no-fast` | Original lower-memory Clover input mode. |
-| `--low` | Original minimum-memory Clover mode. |
-| `--align` | Original Clover global-matching feature. |
-
-For the original algorithm and parameter definitions, see the upstream Clover repository and paper.
-
-## Testing
-
-From the repository root:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-The development branch additionally contains research regression tests used to validate backend equivalence, the `U-1` alignment bound, Clover worker integration, coverage behavior, and real-data reconstruction.
-
-## Relationship to upstream Clover
-
-This fork preserves Clover's clustering/routing logic and adds reconstruction as an optional downstream stage. Reconstruction receives only already-decided cluster memberships and does not use reference truth, Bowtie labels, or known source sequences during normal execution.
-
-## License
-
-Clover is distributed under the GNU General Public License. See `LICENSE` for the repository license terms.
-
 ## Citation
 
 For the original Clover clustering algorithm, please cite:
 
-> Qu G, Yan Z, Wu H. **Clover: tree structure-based efficient DNA clustering for DNA-based data storage.** Briefings in Bioinformatics. 2022;23(5):bbac336.
+Qu G, Yan Z, Wu H. Clover: tree structure-based efficient DNA clustering for
+DNA-based data storage. Briefings in Bioinformatics. 2022;23(5):bbac336.
 
-If you use Reed in this fork, please also cite the corresponding Reed work once its citation is available.
+## License
+
+Clover is distributed under the GNU General Public License. See `LICENSE` for
+the repository license terms.
