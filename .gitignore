@@ -1,4 +1,3 @@
-
 __pycache__/
 *.py[cod]
 
@@ -16,7 +15,6 @@ dist/
 *.log
 *.tmp
 .DS_Store
-
 *.bak
 *.before_*
 
@@ -24,9 +22,17 @@ results/
 experiment_results/
 benchmark_results/
 
+# Large sequencing/alignment artifacts stay outside GitHub.
 *.fastq
 *.fastq.gz
 *.fq
 *.fq.gz
 *.sam
 *.bam
+
+# Keep compact sequence/reference data under data/ when needed.
+!data/
+!data/**/*.txt
+!data/**/*.fa
+!data/**/*.fasta
+!data/**/*.fna
