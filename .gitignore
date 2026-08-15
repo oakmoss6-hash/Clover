@@ -22,17 +22,17 @@ results/
 experiment_results/
 benchmark_results/
 
-# Large sequencing/alignment artifacts stay outside GitHub.
+# Keep all sequencing/reference data outside GitHub.
+data/
 *.fastq
 *.fastq.gz
 *.fq
 *.fq.gz
+*.fasta
+*.fa
+*.fna
 *.sam
 *.bam
 
-# Keep compact sequence/reference data under data/ when needed.
-!data/
-!data/**/*.txt
-!data/**/*.fa
-!data/**/*.fasta
-!data/**/*.fna
+# Cluster/reconstruction outputs stay local.
+*.tsv
